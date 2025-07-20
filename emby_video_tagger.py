@@ -26,6 +26,7 @@ Environment Variables:
 import requests
 import cv2
 import lmstudio as lms
+import ollama
 import base64
 import json
 import time
@@ -45,6 +46,7 @@ import os
 import tempfile
 import shutil
 from dotenv import load_dotenv
+from abc import ABC, abstractmethod
 
 
 class TaskStatus(Enum):
@@ -118,7 +120,7 @@ class EmbyVideoTagger:
         item = video["Items"][0]
         item["Tags"] = item.get("Tags", []) + new_tags
         item["TagItems"] = item.get("TagItems", []) + new_tags
-        self.logger.info(f"Updating tags for item {item_id}: {item["TagItems"]}")
+        self.logger.info(f"Updating tags for item {item_id}: {item['TagItems']}")
         # self.logger.info(item)
 
         try:
@@ -252,10 +254,10 @@ class IntelligentFrameExtractor:
         return extracted_frames
 
 
-class VisionAPIProcessor:
-    """Handles LMStudio Vision API interactions for video frame analysis"""
+class BaseVisionProcessor(ABC):
+    """Abstract base class for AI vision processors"""
 
-    def __init__(self, model_name: str = "qwen2.5-vl-7b-instruct-abliterated"):
+    def __init__(self, model_name: str):
         self.model_name = model_name
         self.tag_prompt = self._create_tagging_prompt()
         self.logger = logging.getLogger(__name__)
@@ -311,6 +313,18 @@ class VisionAPIProcessor:
         # If no JSON found, return the original text
         return response_text.strip()
 
+    @abstractmethod
+    def analyze_frames_sync(self, frame_paths: List[str]) -> List[str]:
+        """Synchronous frame analysis for immediate processing"""
+        pass
+
+
+class LMStudioVisionProcessor(BaseVisionProcessor):
+    """Handles LMStudio Vision API interactions for video frame analysis"""
+
+    def __init__(self, model_name: str = "qwen2.5-vl-7b-instruct-abliterated"):
+        super().__init__(model_name)
+
     def analyze_frames_sync(self, frame_paths: List[str]) -> List[str]:
         """Synchronous frame analysis for immediate processing"""
         all_tags = []
@@ -352,6 +366,87 @@ class VisionAPIProcessor:
         return list(set(all_tags))
 
 
+class OllamaVisionProcessor(BaseVisionProcessor):
+    """Handles Ollama Vision API interactions for video frame analysis"""
+
+    def __init__(
+        self, model_name: str = "llava", base_url: str = "http://localhost:11434"
+    ):
+        super().__init__(model_name)
+        self.base_url = base_url
+
+    def analyze_frames_sync(self, frame_paths: List[str]) -> List[str]:
+        """Synchronous frame analysis for immediate processing using Ollama"""
+        all_tags = []
+
+        for frame_path in frame_paths:
+            try:
+                # Encode image as base64
+                image_data = self.encode_image(frame_path)
+                if not image_data:
+                    continue
+
+                # Create chat request with image
+                response = ollama.chat(
+                    model=self.model_name,
+                    messages=[
+                        {
+                            "role": "user",
+                            "content": self.tag_prompt,
+                            "images": [image_data],
+                        }
+                    ],
+                    options={"num_ctx": 4096, "temperature": 0.1},
+                )
+
+                analysis = response["message"]["content"]
+
+                try:
+                    # Extract JSON from markdown code blocks if present
+                    json_content = self._extract_json_from_response(analysis)
+                    parsed_tags = json.loads(json_content)
+
+                    # Flatten all tag categories into a single list
+                    frame_tags = []
+                    for category, tags in parsed_tags.items():
+                        if isinstance(tags, list):
+                            frame_tags.extend(tags)
+                    all_tags.extend(frame_tags)
+
+                except json.JSONDecodeError as e:
+                    self.logger.warning(
+                        f"Failed to parse JSON response for {frame_path}: {analysis}"
+                    )
+                    self.logger.debug(f"JSON decode error: {e}")
+
+            except Exception as e:
+                self.logger.error(
+                    f"Failed to analyze frame {frame_path} with Ollama: {e}"
+                )
+
+        # Remove duplicates and return unique tags
+        return list(set(all_tags))
+
+
+class VisionProcessorFactory:
+    """Factory class for creating vision processor instances"""
+
+    @staticmethod
+    def create_processor(provider: str, **config) -> BaseVisionProcessor:
+        """Create a vision processor based on the provider type"""
+        if provider.lower() == "lmstudio":
+            model_name = config.get("model_name", "qwen2.5-vl-7b-instruct-abliterated")
+            return LMStudioVisionProcessor(model_name)
+        elif provider.lower() == "ollama":
+            model_name = config.get("model_name", "llava")
+            base_url = config.get("base_url", "http://localhost:11434")
+            return OllamaVisionProcessor(model_name, base_url)
+        else:
+            raise ValueError(
+                f"Unsupported AI provider: {provider}. Supported providers: lmstudio, ollama"
+            )
+
+
 class VideoTaggingAutomation:
     """Main automation class that orchestrates the entire video tagging process"""
 
@@ -363,10 +458,12 @@ class VideoTaggingAutomation:
             config["emby"]["user_id"],
         )
         self.frame_extractor = IntelligentFrameExtractor()
-        self.vision_processor = VisionAPIProcessor(
-            config.get("lmstudio", {}).get(
-                "model_name", "qwen2.5-vl-7b-instruct-abliterated"
-            )
+
+        # Create vision processor using factory pattern
+        ai_provider = config.get("ai_provider", "lmstudio")
+        processor_config = config.get(ai_provider, {})
+        self.vision_processor = VisionProcessorFactory.create_processor(
+            ai_provider, **processor_config
         )
         self.task_tracker = self._setup_task_tracking()
         self.logger = self._setup_logging()
@@ -752,16 +849,23 @@ def main():
                 path_mappings[emby_path.strip()] = local_path.strip()
 
     # Configuration - Update these with your actual values
+    ai_provider = os.getenv("AI_PROVIDER", "lmstudio").lower()
+
     config = {
         "emby": {
             "server_url": os.getenv("EMBY_SERVER_URL", "http://localhost:8096"),
             "api_key": os.getenv("EMBY_API_KEY", "your-emby-api-key"),
             "user_id": os.getenv("EMBY_USER_ID", "your-user-id"),
         },
+        "ai_provider": ai_provider,
         "lmstudio": {
             "model_name": os.getenv(
                 "LMSTUDIO_MODEL_NAME", "qwen2.5-vl-7b-instruct-abliterated"
             )
+        },
+        "ollama": {
+            "model_name": os.getenv("OLLAMA_MODEL_NAME", "llava"),
+            "base_url": os.getenv("OLLAMA_BASE_URL", "http://localhost:11434"),
         },
         "path_mappings": path_mappings,
         "days_back": int(os.getenv("DAYS_BACK", "5")),

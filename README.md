@@ -54,8 +54,15 @@ An automated video tagging system for Emby media server that uses AI vision anal
    EMBY_API_KEY=your-emby-api-key-here
    EMBY_USER_ID=your-emby-user-id-here
 
-   # LM Studio Configuration (for local processing)
+   # AI Provider Configuration (choose one)
+   AI_PROVIDER=lmstudio  # or "ollama"
+
+   # LM Studio Configuration (if using LM Studio)
    LMSTUDIO_MODEL_NAME=qwen2.5-vl-7b-instruct-abliterated
+
+   # Ollama Configuration (if using Ollama)
+   OLLAMA_MODEL_NAME=llava
+   OLLAMA_BASE_URL=http://localhost:11434
 
    # Path Mappings
    # Format: /source_path:/destination_path
@@ -77,11 +84,19 @@ An automated video tagging system for Emby media server that uses AI vision anal
 
 ### AI Model Options
 
-**Option 1: LM Studio (Local)**
+You can choose between two AI providers for video frame analysis:
+
+**Option 1: LM Studio (Default)**
 - Install [LM Studio](https://lmstudio.ai/)
 - Download a vision-capable model (e.g., `qwen2.5-vl-7b-instruct`)
 - Start the local server in LM Studio
-- Set `LMSTUDIO_MODEL_NAME` in your `.env` file
+- Set `AI_PROVIDER=lmstudio` and `LMSTUDIO_MODEL_NAME` in your `.env` file
+
+**Option 2: Ollama**
+- Install [Ollama](https://ollama.ai/)
+- Download a vision model: `ollama pull llava` or `ollama pull llama3.2-vision`
+- Start the Ollama server: `ollama serve`
+- Set `AI_PROVIDER=ollama` and `OLLAMA_MODEL_NAME` in your `.env` file
 
 ## Usage
 
@@ -175,7 +190,7 @@ logging.basicConfig(level=logging.DEBUG)
 ## Acknowledgments
 
 - [Emby Media Server](https://emby.media/) for the excellent media server platform
-- [LM Studio](https://lmstudio.ai/) for local AI model hosting
+- [LM Studio](https://lmstudio.ai/) or [Ollama](https://ollama.ai/) for local AI model hosting
 - [PySceneDetect](https://scenedetect.com/) for intelligent frame extraction
 
 ## Support
