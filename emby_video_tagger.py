@@ -56,56 +56,57 @@ class TaskStatus(Enum):
 
 class EmbyVideoTagger:
     """Handles all Emby API interactions for video metadata management"""
-    
+
     def __init__(self, server_url: str, api_key: str, user_id: str):
-        self.base_url = server_url.rstrip('/')
+        self.base_url = server_url.rstrip("/")
         self.api_key = api_key
         self.user_id = user_id
         self.session = self._create_session()
         self.logger = logging.getLogger(__name__)
-    
+
     def _create_session(self):
         session = requests.Session()
-        session.headers.update({
-            'X-Emby-Token': self.api_key,
-            'Content-Type': 'application/json'
-        })
+        session.headers.update(
+            {"X-Emby-Token": self.api_key, "Content-Type": "application/json"}
+        )
         return session
-    
+
     def get_recent_videos(self, days_back: int = 7) -> List[Dict]:
         """Retrieve recently added videos from Emby"""
         url = f"{self.base_url}/emby/Users/{self.user_id}/Items"
         params = {
-            'SortBy': 'DateCreated',
-            'SortOrder': 'Descending',
-            'Recursive': 'true',
-            'IncludeItemTypes': 'Video',
-            'Fields': 'Tags,TagItems,Genres,ProviderIds,Path,DateCreated',
-            'Limit': 100
+            "SortBy": "DateCreated",
+            "SortOrder": "Descending",
+            "Recursive": "true",
+            "IncludeItemTypes": "Video",
+            "Fields": "Tags,TagItems,Genres,ProviderIds,Path,DateCreated",
+            "Limit": 100,
         }
-        
+
         try:
             response = self.session.get(url, params=params, timeout=30)
             response.raise_for_status()
-            items = response.json().get('Items', [])
-            
+            items = response.json().get("Items", [])
+
             # Filter by date
             cutoff_date = datetime.now() - timedelta(days=days_back)
             recent_items = []
-            
+
             for item in items:
-                created_str = item.get('DateCreated', '')
+                created_str = item.get("DateCreated", "")
                 if created_str:
-                    created_date = datetime.fromisoformat(created_str.replace('Z', '+00:00'))
+                    created_date = datetime.fromisoformat(
+                        created_str.replace("Z", "+00:00")
+                    )
                     if created_date.replace(tzinfo=None) >= cutoff_date:
                         recent_items.append(item)
-            
+
             return recent_items
-            
+
         except Exception as e:
             self.logger.error(f"Failed to retrieve recent videos: {e}")
             return []
-    
+
     def update_video_tags(self, item_id: str, new_tags: List[str]) -> bool:
         """Update video tags in Emby"""
         updateUrl = f"{self.base_url}/emby/Items/{item_id}"
@@ -118,8 +119,8 @@ class EmbyVideoTagger:
         item["Tags"] = item.get("Tags", []) + new_tags
         item["TagItems"] = item.get("TagItems", []) + new_tags
         self.logger.info(f"Updating tags for item {item_id}: {item["TagItems"]}")
-        #self.logger.info(item)
-        
+        # self.logger.info(item)
+
         try:
             time.sleep(0.1)  # Basic rate limiting
             response = self.session.post(updateUrl, json=item, timeout=30)
@@ -133,110 +134,132 @@ class EmbyVideoTagger:
 
 class IntelligentFrameExtractor:
     """Extracts representative frames from videos using scene detection"""
-    
+
     def __init__(self, scene_threshold: float = 27.0):
         self.scene_threshold = scene_threshold
         self.logger = logging.getLogger(__name__)
-    
-    def extract_representative_frames(self, video_path: str, max_frames: int = 10) -> List[Tuple[str, int]]:
+
+    def extract_representative_frames(
+        self, video_path: str, max_frames: int = 10
+    ) -> List[Tuple[str, int]]:
         """Extract key frames using scene detection"""
-        
+
         if not Path(video_path).exists():
             self.logger.error(f"Video file not found: {video_path}")
             return []
-        
+
         try:
             # Detect scenes
-            scene_list = detect(video_path, ContentDetector(threshold=self.scene_threshold))
-            
+            scene_list = detect(
+                video_path, ContentDetector(threshold=self.scene_threshold)
+            )
+
             if not scene_list:
-                self.logger.warning(f"No scenes detected in {video_path}, using fallback")
+                self.logger.warning(
+                    f"No scenes detected in {video_path}, using fallback"
+                )
                 return self._fallback_extraction(video_path, max_frames)
-            
+
             return self._extract_scene_frames(video_path, scene_list, max_frames)
-            
+
         except Exception as e:
             self.logger.error(f"Scene detection failed for {video_path}: {e}")
             return self._fallback_extraction(video_path, max_frames)
-    
-    def _extract_scene_frames(self, video_path: str, scene_list: List, max_frames: int) -> List[Tuple[str, int]]:
+
+    def _extract_scene_frames(
+        self, video_path: str, scene_list: List, max_frames: int
+    ) -> List[Tuple[str, int]]:
         """Extract frames from detected scenes"""
         cap = cv2.VideoCapture(video_path)
         if not cap.isOpened():
             self.logger.error(f"Cannot open video: {video_path}")
             return []
-        
+
         fps = cap.get(cv2.CAP_PROP_FPS) or 25.0  # Default to 25 FPS if unavailable
-        
+
         extracted_frames = []
         output_dir = Path(tempfile.mkdtemp(prefix="frames_"))
-        
+
         # Sample scenes evenly if too many detected
-        scenes_to_process = scene_list[:max_frames] if len(scene_list) <= max_frames else \
-                           [scene_list[i] for i in range(0, len(scene_list), len(scene_list) // max_frames)]
-        
+        scenes_to_process = (
+            scene_list[:max_frames]
+            if len(scene_list) <= max_frames
+            else [
+                scene_list[i]
+                for i in range(0, len(scene_list), len(scene_list) // max_frames)
+            ]
+        )
+
         for i, scene in enumerate(scenes_to_process):
             try:
                 # Extract middle frame of each scene
                 start_frame = scene[0].get_frames()
-                end_frame = scene[1].get_frames() if len(scene) > 1 else start_frame + int(fps * 2)
+                end_frame = (
+                    scene[1].get_frames()
+                    if len(scene) > 1
+                    else start_frame + int(fps * 2)
+                )
                 middle_frame = (start_frame + end_frame) // 2
-                
+
                 cap.set(cv2.CAP_PROP_POS_FRAMES, middle_frame)
                 ret, frame = cap.read()
-                
+
                 if ret:
-                    filename = str(output_dir / f"scene_{i:03d}_frame_{middle_frame:06d}.jpg")
+                    filename = str(
+                        output_dir / f"scene_{i:03d}_frame_{middle_frame:06d}.jpg"
+                    )
                     cv2.imwrite(filename, frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
                     extracted_frames.append((filename, middle_frame))
-                    
+
             except Exception as e:
                 self.logger.warning(f"Failed to extract frame from scene {i}: {e}")
                 continue
-        
+
         cap.release()
         return extracted_frames
-    
-    def _fallback_extraction(self, video_path: str, max_frames: int) -> List[Tuple[str, int]]:
+
+    def _fallback_extraction(
+        self, video_path: str, max_frames: int
+    ) -> List[Tuple[str, int]]:
         """Fallback to uniform sampling if scene detection fails"""
         cap = cv2.VideoCapture(video_path)
         if not cap.isOpened():
             return []
-        
+
         total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
         if total_frames <= 0:
             cap.release()
             return []
-        
+
         frame_step = max(1, total_frames // max_frames)
-        
+
         extracted_frames = []
         output_dir = Path(tempfile.mkdtemp(prefix="frames_"))
-        
+
         for i in range(0, total_frames, frame_step):
             if len(extracted_frames) >= max_frames:
                 break
-                
+
             cap.set(cv2.CAP_PROP_POS_FRAMES, i)
             ret, frame = cap.read()
-            
+
             if ret:
                 filename = str(output_dir / f"uniform_frame_{i:06d}.jpg")
                 cv2.imwrite(filename, frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
                 extracted_frames.append((filename, i))
-        
+
         cap.release()
         return extracted_frames
 
 
 class VisionAPIProcessor:
     """Handles LMStudio Vision API interactions for video frame analysis"""
-    
+
     def __init__(self, model_name: str = "qwen2.5-vl-7b-instruct-abliterated"):
         self.model_name = model_name
         self.tag_prompt = self._create_tagging_prompt()
         self.logger = logging.getLogger(__name__)
-    
+
     def _create_tagging_prompt(self) -> str:
         return """
         Analyze this video frame and generate descriptive tags for media organization.
@@ -257,41 +280,41 @@ class VisionAPIProcessor:
             "mood": ["energetic", "professional", "casual"]
         }
         """
-    
+
     def encode_image(self, image_path: str) -> str:
         """Convert image to base64 for API submission"""
         try:
             with open(image_path, "rb") as image_file:
-                return base64.b64encode(image_file.read()).decode('utf-8')
+                return base64.b64encode(image_file.read()).decode("utf-8")
         except Exception as e:
             self.logger.error(f"Failed to encode image {image_path}: {e}")
             return ""
-    
+
     def _extract_json_from_response(self, response_text: str) -> str:
         """Extract JSON content from markdown code blocks or plain text"""
         import re
-        
+
         # Try to find JSON within markdown code fences
-        json_pattern = r'```(?:json)?\s*(\{.*?\})\s*```'
+        json_pattern = r"```(?:json)?\s*(\{.*?\})\s*```"
         match = re.search(json_pattern, response_text, re.DOTALL)
-        
+
         if match:
             return match.group(1).strip()
-        
+
         # Try to find JSON object without code fences
-        json_object_pattern = r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}'
+        json_object_pattern = r"\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}"
         match = re.search(json_object_pattern, response_text, re.DOTALL)
-        
+
         if match:
             return match.group(0).strip()
-        
+
         # If no JSON found, return the original text
         return response_text.strip()
-    
+
     def analyze_frames_sync(self, frame_paths: List[str]) -> List[str]:
         """Synchronous frame analysis for immediate processing"""
         all_tags = []
-        
+
         for frame_path in frame_paths:
             try:
                 with lms.Client() as client:
@@ -301,67 +324,73 @@ class VisionAPIProcessor:
                     chat = lms.Chat()
                     chat.add_user_message(self.tag_prompt, images=[image_handle])
                     prediction = model.respond(chat)
-                    
+
                     analysis = str(prediction)
-                
+
                 try:
                     # Extract JSON from markdown code blocks if present
                     json_content = self._extract_json_from_response(analysis)
                     parsed_tags = json.loads(json_content)
-                    
+
                     # Flatten all tag categories into a single list
                     frame_tags = []
                     for category, tags in parsed_tags.items():
                         if isinstance(tags, list):
                             frame_tags.extend(tags)
                     all_tags.extend(frame_tags)
-                    
+
                 except json.JSONDecodeError as e:
-                    self.logger.warning(f"Failed to parse JSON response for {frame_path}: {analysis}")
+                    self.logger.warning(
+                        f"Failed to parse JSON response for {frame_path}: {analysis}"
+                    )
                     self.logger.debug(f"JSON decode error: {e}")
-                    
+
             except Exception as e:
                 self.logger.error(f"Failed to analyze frame {frame_path}: {e}")
-                
+
         # Remove duplicates and return unique tags
         return list(set(all_tags))
-    
 
 
 class VideoTaggingAutomation:
     """Main automation class that orchestrates the entire video tagging process"""
-    
+
     def __init__(self, config: Dict):
         self.config = config
         self.emby_client = EmbyVideoTagger(
-            config['emby']['server_url'],
-            config['emby']['api_key'],
-            config['emby']['user_id']
+            config["emby"]["server_url"],
+            config["emby"]["api_key"],
+            config["emby"]["user_id"],
         )
         self.frame_extractor = IntelligentFrameExtractor()
-        self.vision_processor = VisionAPIProcessor(config.get('lmstudio', {}).get('model_name', 'qwen2.5-vl-7b-instruct-abliterated'))
+        self.vision_processor = VisionAPIProcessor(
+            config.get("lmstudio", {}).get(
+                "model_name", "qwen2.5-vl-7b-instruct-abliterated"
+            )
+        )
         self.task_tracker = self._setup_task_tracking()
         self.logger = self._setup_logging()
-        self.path_mappings = config.get('path_mappings', {})
-        self.days_back = config.get('days_back', 5)
-    
+        self.path_mappings = config.get("path_mappings", {})
+        self.days_back = config.get("days_back", 5)
+
     def _setup_logging(self):
         """Configure logging for the application"""
         logging.basicConfig(
             level=logging.INFO,
-            format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+            format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
             handlers=[
-                logging.FileHandler('video_tagging.log'),
-                logging.StreamHandler()
-            ]
+                logging.FileHandler("video_tagging.log"),
+                logging.StreamHandler(),
+            ],
         )
         return logging.getLogger(__name__)
-    
+
     def _setup_task_tracking(self):
         """Initialize SQLite database for tracking processing tasks"""
-        db_path = 'video_tasks.db'
+        db_path = "video_tasks.db"
         conn = sqlite3.connect(db_path)
-        conn.execute("""
+        conn.execute(
+            """
             CREATE TABLE IF NOT EXISTS video_tasks (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 emby_id TEXT UNIQUE NOT NULL,
@@ -372,82 +401,78 @@ class VideoTaggingAutomation:
                 tag_count INTEGER DEFAULT 0,
                 error_message TEXT
             )
-        """)
+        """
+        )
         conn.commit()
         conn.close()
         return db_path
-    
+
     def _setup_scheduler(self):
         """Configure APScheduler for automated processing"""
-        jobstores = {
-            'default': SQLAlchemyJobStore(url='sqlite:///jobs.sqlite')
-        }
-        executors = {
-            'default': ThreadPoolExecutor(2)  # Limit concurrent processing
-        }
-        job_defaults = {
-            'coalesce': True,
-            'max_instances': 1
-        }
-        
+        jobstores = {"default": SQLAlchemyJobStore(url="sqlite:///jobs.sqlite")}
+        executors = {"default": ThreadPoolExecutor(2)}  # Limit concurrent processing
+        job_defaults = {"coalesce": True, "max_instances": 1}
+
         # Check if job already exists in the database before creating scheduler
-        job_id = 'daily_video_tagging'
+        job_id = "daily_video_tagging"
         job_exists = self._check_job_exists_in_db(job_id)
-        
+
         scheduler = BlockingScheduler(
-            jobstores=jobstores,
-            executors=executors,
-            job_defaults=job_defaults
+            jobstores=jobstores, executors=executors, job_defaults=job_defaults
         )
-        
+
         if not job_exists:
             # Job doesn't exist, add it
             scheduler.add_job(
                 self.process_daily_videos,
-                'cron',
+                "cron",
                 args=[self.days_back],
                 hour=2,
                 minute=0,
-                id=job_id
+                id=job_id,
             )
             self.logger.info(f"Added new job '{job_id}'")
         else:
             self.logger.info(f"Job '{job_id}' already exists in database, skipping add")
-        
+
         return scheduler
-    
+
     def _check_job_exists_in_db(self, job_id: str) -> bool:
         """Check if a job exists in the APScheduler SQLite database"""
         import sqlite3
-        
-        db_path = 'jobs.sqlite'
+
+        db_path = "jobs.sqlite"
         if not Path(db_path).exists():
             return False
-        
+
         try:
             conn = sqlite3.connect(db_path)
-            cursor = conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='apscheduler_jobs'")
+            cursor = conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='apscheduler_jobs'"
+            )
             table_exists = cursor.fetchone() is not None
-            
+
             if not table_exists:
                 conn.close()
                 return False
-            
-            cursor = conn.execute("SELECT COUNT(*) FROM apscheduler_jobs WHERE id = ?", (job_id,))
+
+            cursor = conn.execute(
+                "SELECT COUNT(*) FROM apscheduler_jobs WHERE id = ?", (job_id,)
+            )
             count = cursor.fetchone()[0]
             conn.close()
-            
+
             return count > 0
-            
+
         except Exception as e:
             self.logger.warning(f"Failed to check job existence in database: {e}")
             return False
-    
+
     def _remap_video_path(self, emby_path: str) -> str:
         """Remap Emby server path to local machine path"""
         if not self.path_mappings:
             return emby_path
-        
+
         # Try each mapping to see if it matches the beginning of the path
         for emby_prefix, local_prefix in self.path_mappings.items():
             if emby_path.startswith(emby_prefix):
@@ -455,90 +480,106 @@ class VideoTaggingAutomation:
                 remapped_path = emby_path.replace(emby_prefix, local_prefix, 1)
                 self.logger.debug(f"Remapped path: {emby_path} -> {remapped_path}")
                 return remapped_path
-        
+
         # If no mapping found, return original path
         self.logger.warning(f"No path mapping found for: {emby_path}")
         return emby_path
-    
+
     def process_daily_videos(self, days_back: int = 5):
         """Main automation function - processes recent videos"""
         self.logger.info("Starting daily video processing")
-        
+
         try:
             # Get recently added videos
             recent_videos = self.emby_client.get_recent_videos(days_back=days_back)
             self.logger.info(f"Found {len(recent_videos)} recent videos")
-            
+
             successful_processes = 0
-            
+
             for video in recent_videos:
-                self.logger.info(f"Processing video: {video.get('Name', 'Unknown')} with id {video['Id']}")
+                self.logger.info(
+                    f"Processing video: {video.get('Name', 'Unknown')} with id {video['Id']}"
+                )
                 try:
                     if self._should_process_video(video):
                         success = self._process_single_video(video)
                         if success:
                             successful_processes += 1
-                        
+
                         # Add delay between videos to avoid overwhelming the system
                         time.sleep(2)
-                            
+
                 except Exception as e:
-                    self.logger.error(f"Failed to process video {video.get('Name', 'Unknown')}: {str(e)}")
-                    self._update_task_status(video['Id'], TaskStatus.FAILED, error=str(e))
-            
-            self.logger.info(f"Completed daily processing: {successful_processes}/{len(recent_videos)} successful")
-            
+                    self.logger.error(
+                        f"Failed to process video {video.get('Name', 'Unknown')}: {str(e)}"
+                    )
+                    self._update_task_status(
+                        video["Id"], TaskStatus.FAILED, error=str(e)
+                    )
+
+            self.logger.info(
+                f"Completed daily processing: {successful_processes}/{len(recent_videos)} successful"
+            )
+
         except Exception as e:
             self.logger.error(f"Daily processing failed: {str(e)}")
-    
+
     def _process_single_video(self, video: Dict) -> bool:
         """Process individual video with comprehensive error handling"""
-        video_id = video['Id']
-        emby_video_path = video['Path']
+        video_id = video["Id"]
+        emby_video_path = video["Path"]
         video_path = self._remap_video_path(emby_video_path)
-        video_name = video.get('Name', 'Unknown')
-        
+        video_name = video.get("Name", "Unknown")
+
         self.logger.info(f"Processing video: {video_name}")
         self.logger.info(f"Original path: {emby_video_path}")
         self.logger.info(f"Remapped path: {video_path}")
         self._update_task_status(video_id, TaskStatus.PROCESSING, file_path=video_path)
-        
+
         temp_dirs = []
-        
+
         try:
             # Extract frames
-            frame_paths = self.frame_extractor.extract_representative_frames(video_path, max_frames=5)
+            frame_paths = self.frame_extractor.extract_representative_frames(
+                video_path, max_frames=5
+            )
             if not frame_paths:
                 raise ValueError("No frames extracted from video")
-            
+
             # Track temp directories for cleanup
             temp_dirs.extend([Path(fp[0]).parent for fp in frame_paths])
-            
+
             # Analyze frames using LMStudio
-            tags = self.vision_processor.analyze_frames_sync([fp[0] for fp in frame_paths])
-            
+            tags = self.vision_processor.analyze_frames_sync(
+                [fp[0] for fp in frame_paths]
+            )
+
             if tags:
                 # Get existing tags and merge with new ones
-                existing_tags = video.get('Tags', [])
-                all_tags = list(set(existing_tags + tags + ['ai-generated']))  # Add marker tag
-                
+                existing_tags = video.get("Tags", [])
+                all_tags = list(
+                    set(existing_tags + tags + ["ai-generated"])
+                )  # Add marker tag
+
                 # Update Emby with new tags
                 success = self.emby_client.update_video_tags(video_id, all_tags)
                 if success:
                     self.logger.info(f"Updated {video_name} with {len(tags)} new tags")
-                    self._update_task_status(video_id, TaskStatus.COMPLETED, tag_count=len(tags))
+                    self._update_task_status(
+                        video_id, TaskStatus.COMPLETED, tag_count=len(tags)
+                    )
                 else:
                     raise ValueError("Failed to update tags in Emby")
             else:
                 raise ValueError("No tags generated from analysis")
-            
+
             return True
-            
+
         except Exception as e:
             self.logger.error(f"Processing failed for {video_name}: {str(e)}")
             self._update_task_status(video_id, TaskStatus.FAILED, error=str(e))
             return False
-            
+
         finally:
             # Clean up temporary files
             for temp_dir in temp_dirs:
@@ -546,66 +587,84 @@ class VideoTaggingAutomation:
                     if temp_dir.exists():
                         shutil.rmtree(temp_dir)
                 except Exception as e:
-                    self.logger.warning(f"Failed to clean up temp directory {temp_dir}: {e}")
-    
+                    self.logger.warning(
+                        f"Failed to clean up temp directory {temp_dir}: {e}"
+                    )
+
     def _should_process_video(self, video: Dict) -> bool:
         """Determine if video needs processing"""
         # Check if already processed
-        existing_tags = [x["Name"] for x in video.get('TagItems', [])]
-        ai_tag_indicators = ['ai-generated', 'auto-tagged', 'vision-analyzed']
-        if any(indicator in tag.lower() for tag in existing_tags for indicator in ai_tag_indicators):
-            self.logger.info(f"Skipping {video.get('Name', 'Unknown')} - already processed")
+        existing_tags = [x["Name"] for x in video.get("TagItems", [])]
+        ai_tag_indicators = ["ai-generated", "auto-tagged", "vision-analyzed"]
+        if any(
+            indicator in tag.lower()
+            for tag in existing_tags
+            for indicator in ai_tag_indicators
+        ):
+            self.logger.info(
+                f"Skipping {video.get('Name', 'Unknown')} - already processed"
+            )
             return False
-        
+
         # Check file existence and size using remapped path
-        emby_video_path = video['Path']
+        emby_video_path = video["Path"]
         video_path = Path(self._remap_video_path(emby_video_path))
         if not video_path.exists():
-            self.logger.warning(f"Video file not found: {video_path} (original: {emby_video_path})")
+            self.logger.warning(
+                f"Video file not found: {video_path} (original: {emby_video_path})"
+            )
             return False
-        
+
         # Skip very small files (likely not full videos)
         min_size = 10 * 1024 * 1024  # 10MB
         if video_path.stat().st_size < min_size:
-            self.logger.info(f"Skipping {video.get('Name', 'Unknown')} - file too small")
+            self.logger.info(
+                f"Skipping {video.get('Name', 'Unknown')} - file too small"
+            )
             return False
-        
+
         return True
-    
-    def _update_task_status(self, video_id: str, status: TaskStatus, tag_count: int = 0,
-                           error: Optional[str] = None, file_path: Optional[str] = None):
+
+    def _update_task_status(
+        self,
+        video_id: str,
+        status: TaskStatus,
+        tag_count: int = 0,
+        error: Optional[str] = None,
+        file_path: Optional[str] = None,
+    ):
         """Update task processing status in database"""
         conn = sqlite3.connect(self.task_tracker)
-        
+
         try:
             if status == TaskStatus.PROCESSING and file_path:
                 conn.execute(
                     "INSERT OR REPLACE INTO video_tasks (emby_id, file_path, status) VALUES (?, ?, ?)",
-                    (video_id, file_path, status.value)
+                    (video_id, file_path, status.value),
                 )
             elif status == TaskStatus.COMPLETED:
                 conn.execute(
                     "UPDATE video_tasks SET status = ?, completed_at = CURRENT_TIMESTAMP, tag_count = ? WHERE emby_id = ?",
-                    (status.value, tag_count, video_id)
+                    (status.value, tag_count, video_id),
                 )
             elif status == TaskStatus.FAILED:
                 conn.execute(
                     "UPDATE video_tasks SET status = ?, error_message = ? WHERE emby_id = ?",
-                    (status.value, error, video_id)
+                    (status.value, error, video_id),
                 )
             else:
                 conn.execute(
                     "INSERT OR REPLACE INTO video_tasks (emby_id, status) VALUES (?, ?)",
-                    (video_id, status.value)
+                    (video_id, status.value),
                 )
-            
+
             conn.commit()
-            
+
         except Exception as e:
             self.logger.error(f"Failed to update task status: {e}")
         finally:
             conn.close()
-    
+
     def process_single_video_manual(self, video_id: str) -> bool:
         """Manually process a single video by ID"""
         try:
@@ -615,54 +674,60 @@ class VideoTaggingAutomation:
             response.raise_for_status()
             video = response.json()
             self.logger.info(video["Items"][0])
-            
+
             return self._process_single_video(video["Items"][0])
-            
+
         except Exception as e:
             self.logger.error(f"Failed to manually process video {video_id}: {e}")
             return False
-    
+
     def get_processing_stats(self) -> Dict:
         """Get statistics about processing tasks"""
         conn = sqlite3.connect(self.task_tracker)
-        
+
         try:
             stats = {}
-            
+
             # Count by status
-            cursor = conn.execute("SELECT status, COUNT(*) FROM video_tasks GROUP BY status")
-            stats['by_status'] = dict(cursor.fetchall())
-            
+            cursor = conn.execute(
+                "SELECT status, COUNT(*) FROM video_tasks GROUP BY status"
+            )
+            stats["by_status"] = dict(cursor.fetchall())
+
             # Recent activity
-            cursor = conn.execute("""
+            cursor = conn.execute(
+                """
                 SELECT COUNT(*) FROM video_tasks 
                 WHERE created_at >= datetime('now', '-7 days')
-            """)
-            stats['last_7_days'] = cursor.fetchone()[0]
-            
+            """
+            )
+            stats["last_7_days"] = cursor.fetchone()[0]
+
             # Total tags generated
-            cursor = conn.execute("SELECT SUM(tag_count) FROM video_tasks WHERE status = 'completed'")
+            cursor = conn.execute(
+                "SELECT SUM(tag_count) FROM video_tasks WHERE status = 'completed'"
+            )
             result = cursor.fetchone()[0]
-            stats['total_tags'] = result if result else 0
-            
+            stats["total_tags"] = result if result else 0
+
             return stats
-            
+
         except Exception as e:
             self.logger.error(f"Failed to get stats: {e}")
             return {}
         finally:
             conn.close()
-    
+
     def run_once(self):
         """Run processing once without scheduling"""
         self.logger.info("Running video tagging once")
         self.process_daily_videos(self.days_back)
-    
+
     def run_scheduler(self):
         """Start the automation scheduler"""
         scheduler = self._setup_scheduler()
         self.logger.info("Starting video tagging automation scheduler")
-        
+
         try:
             scheduler.start()
         except KeyboardInterrupt:
@@ -672,72 +737,83 @@ class VideoTaggingAutomation:
 
 def main():
     """Main function to configure and run the video tagging automation"""
-    
+
     # Load environment variables from .env file
     load_dotenv()
-    
+
     # Parse path mappings from environment variable
     path_mappings = {}
-    path_mappings_env = os.getenv('PATH_MAPPINGS', '')
+    path_mappings_env = os.getenv("PATH_MAPPINGS", "")
     if path_mappings_env:
         # Format: "emby_path1:local_path1,emby_path2:local_path2"
-        for mapping in path_mappings_env.split(','):
-            if ':' in mapping:
-                emby_path, local_path = mapping.strip().split(':', 1)
+        for mapping in path_mappings_env.split(","):
+            if ":" in mapping:
+                emby_path, local_path = mapping.strip().split(":", 1)
                 path_mappings[emby_path.strip()] = local_path.strip()
-    
+
     # Configuration - Update these with your actual values
     config = {
-        'emby': {
-            'server_url': os.getenv('EMBY_SERVER_URL', 'http://localhost:8096'),
-            'api_key': os.getenv('EMBY_API_KEY', 'your-emby-api-key'),
-            'user_id': os.getenv('EMBY_USER_ID', 'your-user-id')
+        "emby": {
+            "server_url": os.getenv("EMBY_SERVER_URL", "http://localhost:8096"),
+            "api_key": os.getenv("EMBY_API_KEY", "your-emby-api-key"),
+            "user_id": os.getenv("EMBY_USER_ID", "your-user-id"),
         },
-        'lmstudio': {
-            'model_name': os.getenv('LMSTUDIO_MODEL_NAME', 'qwen2.5-vl-7b-instruct-abliterated')
+        "lmstudio": {
+            "model_name": os.getenv(
+                "LMSTUDIO_MODEL_NAME", "qwen2.5-vl-7b-instruct-abliterated"
+            )
         },
-        'path_mappings': path_mappings,
-        'days_back': int(os.getenv('DAYS_BACK', '5'))
+        "path_mappings": path_mappings,
+        "days_back": int(os.getenv("DAYS_BACK", "5")),
     }
-    
+
     # Validate configuration
-    required_vars = ['EMBY_API_KEY', 'EMBY_USER_ID']
+    required_vars = ["EMBY_API_KEY", "EMBY_USER_ID"]
     missing_vars = [var for var in required_vars if not os.getenv(var)]
-    
+
     if missing_vars:
-        print(f"Error: Missing required environment variables: {', '.join(missing_vars)}")
+        print(
+            f"Error: Missing required environment variables: {', '.join(missing_vars)}"
+        )
         print("Please set these environment variables before running the script.")
         return
-    
+
     # Create automation instance
     automation = VideoTaggingAutomation(config)
-    
+
     # Check command line arguments
     import sys
+
     if len(sys.argv) > 1:
         command = sys.argv[1].lower()
-        
-        if command == 'once':
+
+        if command == "once":
             # Run once without scheduling
             automation.run_once()
-        elif command == 'stats':
+        elif command == "stats":
             # Show processing statistics
             stats = automation.get_processing_stats()
             print("\nProcessing Statistics:")
             print(f"Status counts: {stats.get('by_status', {})}")
             print(f"Videos processed in last 7 days: {stats.get('last_7_days', 0)}")
             print(f"Total tags generated: {stats.get('total_tags', 0)}")
-        elif command == 'manual' and len(sys.argv) > 2:
+        elif command == "manual" and len(sys.argv) > 2:
             # Manually process a specific video ID
             video_id = sys.argv[2]
             success = automation.process_single_video_manual(video_id)
-            print(f"Manual processing {'succeeded' if success else 'failed'} for video {video_id}")
+            print(
+                f"Manual processing {'succeeded' if success else 'failed'} for video {video_id}"
+            )
         else:
             print("Usage:")
             print("  python emby_video_tagger.py          # Run scheduled automation")
-            print("  python emby_video_tagger.py once     # Run once without scheduling")
+            print(
+                "  python emby_video_tagger.py once     # Run once without scheduling"
+            )
             print("  python emby_video_tagger.py stats    # Show processing statistics")
-            print("  python emby_video_tagger.py manual <video_id>  # Process specific video")
+            print(
+                "  python emby_video_tagger.py manual <video_id>  # Process specific video"
+            )
     else:
         # Run with scheduling
         automation.run_scheduler()
@@ -745,4 +821,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-    
