@@ -48,6 +48,7 @@ import tempfile
 import shutil
 from dotenv import load_dotenv
 from abc import ABC, abstractmethod
+import re
 
 
 class TaskStatus(Enum):
@@ -59,6 +60,33 @@ class TaskStatus(Enum):
 
 class EmbyVideoTagger:
     """Handles all Emby API interactions for video metadata management"""
+
+    def _parse_emby_datetime(self, date_string: str) -> datetime:
+        """
+        Parse Emby datetime string, handling the case where microseconds have more than 6 digits.
+        Emby sometimes returns datetime strings with 7 decimal places which Python can't parse.
+        """
+        try:
+            # Replace Z with +00:00 for proper timezone handling
+            date_str = date_string.replace('Z', '+00:00')
+            
+            # Handle microseconds with more than 6 decimal places
+            # Pattern: YYYY-MM-DDTHH:MM:SS.NNNNNNN+TZ or YYYY-MM-DDTHH:MM:SS.NNNNNNN-TZ
+            pattern = r'(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})\.(\d+)([\+\-]\d{2}:\d{2})$'
+            match = re.match(pattern, date_str)
+            
+            if match:
+                date_part, microseconds, timezone_part = match.groups()
+                # Truncate microseconds to 6 digits if longer
+                if len(microseconds) > 6:
+                    microseconds = microseconds[:6]
+                date_str = f"{date_part}.{microseconds}{timezone_part}"
+            
+            return datetime.fromisoformat(date_str)
+        except ValueError as e:
+            self.logger.error(f"Failed to parse datetime '{date_string}': {e}")
+            # Return current time as fallback
+            return datetime.now()
 
     def __init__(self, server_url: str, api_key: str, user_id: str):
         self.base_url = server_url.rstrip("/")
@@ -98,9 +126,7 @@ class EmbyVideoTagger:
             for item in items:
                 created_str = item.get("DateCreated", "")
                 if created_str:
-                    created_date = datetime.fromisoformat(
-                        created_str.replace("Z", "+00:00")
-                    )
+                    created_date = self._parse_emby_datetime(created_str)
                     if created_date.replace(tzinfo=None) >= cutoff_date:
                         recent_items.append(item)
 
@@ -509,64 +535,31 @@ class VideoTaggingAutomation:
 
     def _setup_scheduler(self):
         """Configure APScheduler for automated processing"""
-        jobstores = {"default": SQLAlchemyJobStore(url="sqlite:///jobs.sqlite")}
+        # Use memory job store instead of SQLAlchemy to avoid pickling issues
+        from apscheduler.jobstores.memory import MemoryJobStore
+        
+        jobstores = {"default": MemoryJobStore()}
         executors = {"default": ThreadPoolExecutor(2)}  # Limit concurrent processing
         job_defaults = {"coalesce": True, "max_instances": 1}
-
-        # Check if job already exists in the database before creating scheduler
-        job_id = "daily_video_tagging"
-        job_exists = self._check_job_exists_in_db(job_id)
 
         scheduler = BlockingScheduler(
             jobstores=jobstores, executors=executors, job_defaults=job_defaults
         )
 
-        if not job_exists:
-            # Job doesn't exist, add it
-            scheduler.add_job(
-                self.process_daily_videos,
-                "cron",
-                args=[self.days_back],
-                hour=2,
-                minute=0,
-                id=job_id,
-            )
-            self.logger.info(f"Added new job '{job_id}'")
-        else:
-            self.logger.info(f"Job '{job_id}' already exists in database, skipping add")
+        # Add the job directly since we're using memory store (no persistence)
+        job_id = "daily_video_tagging"
+        scheduler.add_job(
+            self.process_daily_videos,
+            "cron",
+            args=[self.days_back],
+            hour=2,
+            minute=0,
+            id=job_id,
+        )
+        self.logger.info(f"Added new job '{job_id}'")
 
         return scheduler
 
-    def _check_job_exists_in_db(self, job_id: str) -> bool:
-        """Check if a job exists in the APScheduler SQLite database"""
-        import sqlite3
-
-        db_path = "jobs.sqlite"
-        if not Path(db_path).exists():
-            return False
-
-        try:
-            conn = sqlite3.connect(db_path)
-            cursor = conn.execute(
-                "SELECT name FROM sqlite_master WHERE type='table' AND name='apscheduler_jobs'"
-            )
-            table_exists = cursor.fetchone() is not None
-
-            if not table_exists:
-                conn.close()
-                return False
-
-            cursor = conn.execute(
-                "SELECT COUNT(*) FROM apscheduler_jobs WHERE id = ?", (job_id,)
-            )
-            count = cursor.fetchone()[0]
-            conn.close()
-
-            return count > 0
-
-        except Exception as e:
-            self.logger.warning(f"Failed to check job existence in database: {e}")
-            return False
 
     def _remap_video_path(self, emby_path: str) -> str:
         """Remap Emby server path to local machine path"""
