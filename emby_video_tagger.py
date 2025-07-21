@@ -27,6 +27,7 @@ import requests
 import cv2
 import lmstudio as lms
 import ollama
+from ollama import Client
 import base64
 import json
 import time
@@ -118,8 +119,8 @@ class EmbyVideoTagger:
         response.raise_for_status()
         video = response.json()
         item = video["Items"][0]
-        item["Tags"] = item.get("Tags", []) + new_tags
-        item["TagItems"] = item.get("TagItems", []) + new_tags
+        item["Tags"] = new_tags
+        item["TagItems"] = new_tags
         self.logger.info(f"Updating tags for item {item_id}: {item['TagItems']}")
         # self.logger.info(item)
 
@@ -373,13 +374,15 @@ class OllamaVisionProcessor(BaseVisionProcessor):
         self, model_name: str = "llava", base_url: str = "http://localhost:11434"
     ):
         super().__init__(model_name)
-        self.base_url = base_url
+        # self.base_url = base_url
+        self.client = Client(host=base_url)
 
     def analyze_frames_sync(self, frame_paths: List[str]) -> List[str]:
         """Synchronous frame analysis for immediate processing using Ollama"""
         all_tags = []
 
         for frame_path in frame_paths:
+            time.sleep(1)
             try:
                 # Encode image as base64
                 image_data = self.encode_image(frame_path)
@@ -387,7 +390,7 @@ class OllamaVisionProcessor(BaseVisionProcessor):
                     continue
 
                 # Create chat request with image
-                response = ollama.chat(
+                response = self.client.chat(
                     model=self.model_name,
                     messages=[
                         {
@@ -653,7 +656,8 @@ class VideoTaggingAutomation:
 
             if tags:
                 # Get existing tags and merge with new ones
-                existing_tags = video.get("Tags", [])
+                # existing_tags = video.get("Tags", [])
+                existing_tags = [x["Name"] for x in video.get("TagItems", [])]
                 all_tags = list(
                     set(existing_tags + tags + ["ai-generated"])
                 )  # Add marker tag
