@@ -6,6 +6,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ### Installation and Setup
 ```bash
+# Use virtual env
+source .venv/bin/activate
+
 # Install Python dependencies
 pip install -r requirements.txt
 
@@ -21,6 +24,12 @@ python emby_video_tagger.py
 
 # Process recent videos once without scheduling
 python emby_video_tagger.py once
+
+# Process recent videos including favorites
+python emby_video_tagger.py once --include-favorites
+
+# Process only favorite videos
+python emby_video_tagger.py favorites
 
 # Process a specific video by ID
 python emby_video_tagger.py manual <video_id>
@@ -44,8 +53,9 @@ This is an automated video tagging system for Emby media servers that uses AI vi
 
 ### Core Components
 
-1. **EmbyVideoTagger** (`emby_video_tagger.py:57-133`): Handles Emby API interactions
+1. **EmbyVideoTagger** (`emby_video_tagger.py:57-162`): Handles Emby API interactions
    - Retrieves recently added videos via Emby REST API
+   - Retrieves favorite videos using IsFavorite filter
    - Updates video metadata with generated tags
    - Manages API authentication and rate limiting
 
@@ -62,19 +72,21 @@ This is an automated video tagging system for Emby media servers that uses AI vi
    - **VisionProcessorFactory** (`emby_video_tagger.py:428-442`): Creates appropriate processor based on configuration
    - All processors handle JSON response parsing and tag category flattening
 
-4. **VideoTaggingAutomation** (`emby_video_tagger.py:445-736`): Main orchestration class
+4. **VideoTaggingAutomation** (`emby_video_tagger.py:504-843`): Main orchestration class
    - Coordinates the entire tagging pipeline
-   - Manages task tracking via SQLite database
+   - Manages task tracking via SQLite database with source type tracking
    - Implements path remapping for cross-platform file access
    - Provides scheduled automation via APScheduler
+   - Supports processing recent videos, favorites, or both
    - Uses factory pattern to select AI provider at runtime
 
 ### Key Features
 
 - **Path Remapping**: Handles different file paths between Emby server and processing system
-- **Task Tracking**: SQLite database prevents duplicate processing and tracks status
-- **Scheduled Processing**: Daily automated processing of new videos
-- **Comprehensive Logging**: Detailed logging to `video_tagging.log`
+- **Task Tracking**: SQLite database prevents duplicate processing and tracks status with source type
+- **Scheduled Processing**: Daily automated processing of new videos with optional favorites inclusion
+- **Favorites Processing**: Dedicated support for processing favorite videos separately or combined
+- **Comprehensive Logging**: Detailed logging to `video_tagging.log` with source type identification
 - **Error Recovery**: Robust error handling with retry mechanisms
 - **Temporary File Management**: Automatic cleanup of extracted frame files
 
@@ -96,20 +108,25 @@ Environment variables (via `.env` file):
 - `OLLAMA_MODEL_NAME`, `OLLAMA_BASE_URL`: Ollama configuration
 - `PATH_MAPPINGS`: Cross-platform path translation
 - `DAYS_BACK`: Processing window for recent videos
+- `PROCESS_FAVORITES`: Include favorites in scheduled processing (default: false)
+- `FAVORITES_ONLY`: Process only favorites, ignore recent videos (default: false)
 
 ### Database Schema
 
-- `video_tasks.db`: Task tracking with status, timestamps, and error logging
+- `video_tasks.db`: Task tracking with status, timestamps, source type, and error logging
 - `jobs.sqlite`: APScheduler job persistence for automated scheduling
 
 ### Processing Flow
 
-1. Query Emby for recently added videos (configurable timeframe)
+1. Query Emby for videos based on configuration:
+   - Recent videos (configurable timeframe)
+   - Favorite videos (using IsFavorite API filter)
+   - Or both, depending on settings
 2. Filter videos (skip already processed, check file existence/size)
 3. Extract representative frames using scene detection
 4. Analyze frames with selected AI provider (LM Studio or Ollama) to generate tags
 5. Update Emby metadata with generated tags plus "ai-generated" marker
-6. Log results and clean up temporary files
+6. Log results with source type tracking and clean up temporary files
 
 ### AI Provider Selection
 

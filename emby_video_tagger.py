@@ -136,6 +136,31 @@ class EmbyVideoTagger:
             self.logger.error(f"Failed to retrieve recent videos: {e}")
             return []
 
+    def get_favorite_videos(self) -> List[Dict]:
+        """Retrieve favorite videos from Emby"""
+        url = f"{self.base_url}/emby/Users/{self.user_id}/Items"
+        params = {
+            "SortBy": "DateCreated",
+            "SortOrder": "Descending",
+            "Recursive": "true",
+            "IncludeItemTypes": "Video",
+            "Fields": "Tags,TagItems,Genres,ProviderIds,Path,DateCreated",
+            "IsFavorite": "true",
+            "Limit": 1000,
+        }
+
+        try:
+            response = self.session.get(url, params=params, timeout=30)
+            response.raise_for_status()
+            items = response.json().get("Items", [])
+            
+            self.logger.info(f"Retrieved {len(items)} favorite videos from Emby")
+            return items
+
+        except Exception as e:
+            self.logger.error(f"Failed to retrieve favorite videos: {e}")
+            return []
+
     def update_video_tags(self, item_id: str, new_tags: List[str]) -> bool:
         """Update video tags in Emby"""
         updateUrl = f"{self.base_url}/emby/Items/{item_id}"
@@ -494,10 +519,12 @@ class VideoTaggingAutomation:
         self.vision_processor = VisionProcessorFactory.create_processor(
             ai_provider, **processor_config
         )
-        self.task_tracker = self._setup_task_tracking()
         self.logger = self._setup_logging()
+        self.task_tracker = self._setup_task_tracking()
         self.path_mappings = config.get("path_mappings", {})
         self.days_back = config.get("days_back", 5)
+        self.process_favorites = config.get("process_favorites", False)
+        self.favorites_only = config.get("favorites_only", False)
 
     def _setup_logging(self):
         """Configure logging for the application"""
@@ -515,6 +542,8 @@ class VideoTaggingAutomation:
         """Initialize SQLite database for tracking processing tasks"""
         db_path = "video_tasks.db"
         conn = sqlite3.connect(db_path)
+        
+        # Create table if it doesn't exist
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS video_tasks (
@@ -522,6 +551,7 @@ class VideoTaggingAutomation:
                 emby_id TEXT UNIQUE NOT NULL,
                 file_path TEXT NOT NULL,
                 status TEXT NOT NULL,
+                source_type TEXT DEFAULT 'recent',
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 completed_at TIMESTAMP,
                 tag_count INTEGER DEFAULT 0,
@@ -529,6 +559,17 @@ class VideoTaggingAutomation:
             )
         """
         )
+        
+        # Check if source_type column exists and add it if missing (migration)
+        cursor = conn.execute("PRAGMA table_info(video_tasks)")
+        columns = [column[1] for column in cursor.fetchall()]
+        
+        if 'source_type' not in columns:
+            self.logger.info("Migrating database: Adding source_type column")
+            conn.execute("ALTER TABLE video_tasks ADD COLUMN source_type TEXT DEFAULT 'recent'")
+            # Update existing records to have 'recent' as source_type
+            conn.execute("UPDATE video_tasks SET source_type = 'recent' WHERE source_type IS NULL")
+        
         conn.commit()
         conn.close()
         return db_path
@@ -579,23 +620,39 @@ class VideoTaggingAutomation:
         return emby_path
 
     def process_daily_videos(self, days_back: int = 5):
-        """Main automation function - processes recent videos"""
+        """Main automation function - processes recent videos and optionally favorites"""
         self.logger.info("Starting daily video processing")
 
         try:
-            # Get recently added videos
-            recent_videos = self.emby_client.get_recent_videos(days_back=days_back)
-            self.logger.info(f"Found {len(recent_videos)} recent videos")
+            videos_to_process = []
+            
+            # Get videos based on configuration
+            if self.favorites_only:
+                self.logger.info("Processing favorites only")
+                favorite_videos = self.emby_client.get_favorite_videos()
+                videos_to_process.extend([(video, "favorites") for video in favorite_videos])
+            else:
+                # Get recently added videos
+                recent_videos = self.emby_client.get_recent_videos(days_back=days_back)
+                self.logger.info(f"Found {len(recent_videos)} recent videos")
+                videos_to_process.extend([(video, "recent") for video in recent_videos])
+                
+                # Optionally include favorites
+                if self.process_favorites:
+                    self.logger.info("Including favorites in processing")
+                    favorite_videos = self.emby_client.get_favorite_videos()
+                    videos_to_process.extend([(video, "favorites") for video in favorite_videos])
 
+            self.logger.info(f"Total videos to process: {len(videos_to_process)}")
             successful_processes = 0
 
-            for video in recent_videos:
+            for video, source_type in videos_to_process:
                 self.logger.info(
-                    f"Processing video: {video.get('Name', 'Unknown')} with id {video['Id']}"
+                    f"Processing {source_type} video: {video.get('Name', 'Unknown')} with id {video['Id']}"
                 )
                 try:
                     if self._should_process_video(video):
-                        success = self._process_single_video(video)
+                        success = self._process_single_video(video, source_type)
                         if success:
                             successful_processes += 1
 
@@ -604,30 +661,30 @@ class VideoTaggingAutomation:
 
                 except Exception as e:
                     self.logger.error(
-                        f"Failed to process video {video.get('Name', 'Unknown')}: {str(e)}"
+                        f"Failed to process {source_type} video {video.get('Name', 'Unknown')}: {str(e)}"
                     )
                     self._update_task_status(
-                        video["Id"], TaskStatus.FAILED, error=str(e)
+                        video["Id"], TaskStatus.FAILED, error=str(e), source_type=source_type
                     )
 
             self.logger.info(
-                f"Completed daily processing: {successful_processes}/{len(recent_videos)} successful"
+                f"Completed daily processing: {successful_processes}/{len(videos_to_process)} successful"
             )
 
         except Exception as e:
             self.logger.error(f"Daily processing failed: {str(e)}")
 
-    def _process_single_video(self, video: Dict) -> bool:
+    def _process_single_video(self, video: Dict, source_type: str = "recent") -> bool:
         """Process individual video with comprehensive error handling"""
         video_id = video["Id"]
         emby_video_path = video["Path"]
         video_path = self._remap_video_path(emby_video_path)
         video_name = video.get("Name", "Unknown")
 
-        self.logger.info(f"Processing video: {video_name}")
+        self.logger.info(f"Processing {source_type} video: {video_name}")
         self.logger.info(f"Original path: {emby_video_path}")
         self.logger.info(f"Remapped path: {video_path}")
-        self._update_task_status(video_id, TaskStatus.PROCESSING, file_path=video_path)
+        self._update_task_status(video_id, TaskStatus.PROCESSING, file_path=video_path, source_type=source_type)
 
         temp_dirs = []
 
@@ -726,6 +783,7 @@ class VideoTaggingAutomation:
         tag_count: int = 0,
         error: Optional[str] = None,
         file_path: Optional[str] = None,
+        source_type: str = "recent",
     ):
         """Update task processing status in database"""
         conn = sqlite3.connect(self.task_tracker)
@@ -733,8 +791,8 @@ class VideoTaggingAutomation:
         try:
             if status == TaskStatus.PROCESSING and file_path:
                 conn.execute(
-                    "INSERT OR REPLACE INTO video_tasks (emby_id, file_path, status) VALUES (?, ?, ?)",
-                    (video_id, file_path, status.value),
+                    "INSERT OR REPLACE INTO video_tasks (emby_id, file_path, status, source_type) VALUES (?, ?, ?, ?)",
+                    (video_id, file_path, status.value, source_type),
                 )
             elif status == TaskStatus.COMPLETED:
                 conn.execute(
@@ -748,8 +806,8 @@ class VideoTaggingAutomation:
                 )
             else:
                 conn.execute(
-                    "INSERT OR REPLACE INTO video_tasks (emby_id, status) VALUES (?, ?)",
-                    (video_id, status.value),
+                    "INSERT OR REPLACE INTO video_tasks (emby_id, status, source_type) VALUES (?, ?, ?)",
+                    (video_id, status.value, source_type),
                 )
 
             conn.commit()
@@ -758,6 +816,44 @@ class VideoTaggingAutomation:
             self.logger.error(f"Failed to update task status: {e}")
         finally:
             conn.close()
+
+    def process_favorite_videos(self):
+        """Process only favorite videos"""
+        self.logger.info("Starting favorite videos processing")
+
+        try:
+            favorite_videos = self.emby_client.get_favorite_videos()
+            self.logger.info(f"Found {len(favorite_videos)} favorite videos")
+
+            successful_processes = 0
+
+            for video in favorite_videos:
+                self.logger.info(
+                    f"Processing favorite video: {video.get('Name', 'Unknown')} with id {video['Id']}"
+                )
+                try:
+                    if self._should_process_video(video):
+                        success = self._process_single_video(video, "favorites")
+                        if success:
+                            successful_processes += 1
+
+                        # Add delay between videos to avoid overwhelming the system
+                        time.sleep(2)
+
+                except Exception as e:
+                    self.logger.error(
+                        f"Failed to process favorite video {video.get('Name', 'Unknown')}: {str(e)}"
+                    )
+                    self._update_task_status(
+                        video["Id"], TaskStatus.FAILED, error=str(e), source_type="favorites"
+                    )
+
+            self.logger.info(
+                f"Completed favorite processing: {successful_processes}/{len(favorite_videos)} successful"
+            )
+
+        except Exception as e:
+            self.logger.error(f"Favorite processing failed: {str(e)}")
 
     def process_single_video_manual(self, video_id: str) -> bool:
         """Manually process a single video by ID"""
@@ -787,6 +883,12 @@ class VideoTaggingAutomation:
                 "SELECT status, COUNT(*) FROM video_tasks GROUP BY status"
             )
             stats["by_status"] = dict(cursor.fetchall())
+
+            # Count by source type
+            cursor = conn.execute(
+                "SELECT source_type, COUNT(*) FROM video_tasks GROUP BY source_type"
+            )
+            stats["by_source"] = dict(cursor.fetchall())
 
             # Recent activity
             cursor = conn.execute(
@@ -866,6 +968,8 @@ def main():
         },
         "path_mappings": path_mappings,
         "days_back": int(os.getenv("DAYS_BACK", "5")),
+        "process_favorites": os.getenv("PROCESS_FAVORITES", "false").lower() == "true",
+        "favorites_only": os.getenv("FAVORITES_ONLY", "false").lower() == "true",
     }
 
     # Validate configuration
@@ -889,13 +993,25 @@ def main():
         command = sys.argv[1].lower()
 
         if command == "once":
-            # Run once without scheduling
-            automation.run_once()
+            # Check for --include-favorites flag
+            include_favorites = "--include-favorites" in sys.argv
+            if include_favorites:
+                # Temporarily override config for this run
+                original_process_favorites = automation.process_favorites
+                automation.process_favorites = True
+                automation.run_once()
+                automation.process_favorites = original_process_favorites
+            else:
+                automation.run_once()
+        elif command == "favorites":
+            # Process only favorites
+            automation.process_favorite_videos()
         elif command == "stats":
             # Show processing statistics
             stats = automation.get_processing_stats()
             print("\nProcessing Statistics:")
             print(f"Status counts: {stats.get('by_status', {})}")
+            print(f"Source counts: {stats.get('by_source', {})}")
             print(f"Videos processed in last 7 days: {stats.get('last_7_days', 0)}")
             print(f"Total tags generated: {stats.get('total_tags', 0)}")
         elif command == "manual" and len(sys.argv) > 2:
@@ -907,14 +1023,12 @@ def main():
             )
         else:
             print("Usage:")
-            print("  python emby_video_tagger.py          # Run scheduled automation")
-            print(
-                "  python emby_video_tagger.py once     # Run once without scheduling"
-            )
-            print("  python emby_video_tagger.py stats    # Show processing statistics")
-            print(
-                "  python emby_video_tagger.py manual <video_id>  # Process specific video"
-            )
+            print("  python emby_video_tagger.py                    # Run scheduled automation")
+            print("  python emby_video_tagger.py once               # Run once without scheduling")
+            print("  python emby_video_tagger.py once --include-favorites  # Run once including favorites")
+            print("  python emby_video_tagger.py favorites          # Process only favorite videos")
+            print("  python emby_video_tagger.py stats              # Show processing statistics")
+            print("  python emby_video_tagger.py manual <video_id>  # Process specific video")
     else:
         # Run with scheduling
         automation.run_scheduler()
