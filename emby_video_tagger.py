@@ -935,7 +935,7 @@ def main():
     """Main function to configure and run the video tagging automation"""
 
     # Load environment variables from .env file
-    load_dotenv()
+    load_dotenv(override=True)
 
     # Parse path mappings from environment variable
     path_mappings = {}
