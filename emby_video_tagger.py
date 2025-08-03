@@ -660,6 +660,13 @@ class VideoTaggingAutomation:
                         # Add delay between videos to avoid overwhelming the system
                         time.sleep(2)
 
+                    # If the video is a favorite, attempt to copy it regardless of processed status
+                    if source_type == "favorites":
+                        emby_video_path = video["Path"]
+                        video_path = self._remap_video_path(emby_video_path)
+                        video_name = video.get("Name", "Unknown")
+                        self._copy_favorite_video(video_path, video_name)
+
                 except Exception as e:
                     self.logger.error(
                         f"Failed to process {source_type} video {video.get('Name', 'Unknown')}: {str(e)}"
@@ -722,12 +729,6 @@ class VideoTaggingAutomation:
                     )
                 else:
                     raise ValueError("Failed to update tags in Emby")
-                    
-                # Copy favorite video if configured and source_type is favorites
-                if source_type == "favorites":
-                    copy_success = self._copy_favorite_video(video_path, video_name)
-                    if not copy_success:
-                        self.logger.warning(f"Tag update succeeded but copy failed for {video_name}")
             else:
                 raise ValueError("No tags generated from analysis")
 
@@ -884,6 +885,12 @@ class VideoTaggingAutomation:
 
                         # Add delay between videos to avoid overwhelming the system
                         time.sleep(2)
+
+                    # Attempt to copy the favorite video, regardless of processed status
+                    emby_video_path = video["Path"]
+                    video_path = self._remap_video_path(emby_video_path)
+                    video_name = video.get("Name", "Unknown")
+                    self._copy_favorite_video(video_path, video_name)
 
                 except Exception as e:
                     self.logger.error(
