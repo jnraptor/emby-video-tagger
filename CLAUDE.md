@@ -4,7 +4,39 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Development Commands
 
-### Installation and Setup
+### Docker Development (Recommended)
+
+#### Initial Setup
+```bash
+# Copy environment template and configure
+cp .env.example .env
+# Edit .env with your Emby server details and AI provider configuration
+
+# Update docker-compose.yml media volume path
+# Edit: /path/to/your/media:/media:ro
+
+# Build and start services
+docker-compose up -d
+```
+
+#### Development Workflow
+```bash
+# View logs
+docker-compose logs -f emby-video-tagger
+
+# Rebuild after code changes
+docker-compose build
+
+# Stop services
+docker-compose down
+
+# Access container shell for debugging
+docker-compose exec emby-video-tagger bash
+```
+
+### Direct Python Development
+
+#### Installation and Setup
 ```bash
 # Use virtual env
 source .venv/bin/activate
@@ -14,10 +46,33 @@ pip install -r requirements.txt
 
 # Copy environment template and configure
 cp .env.example .env
-# Edit .env with your Emby server details and LM Studio configuration
+# Edit .env with your Emby server details and AI provider configuration
 ```
 
 ### Running the Application
+
+#### Docker Commands
+```bash
+# Run with automatic scheduling (daily at 2 AM)
+docker-compose up -d
+
+# Process recent videos once without scheduling
+docker-compose run --rm emby-video-tagger once
+
+# Process recent videos including favorites
+docker-compose run --rm emby-video-tagger once --include-favorites
+
+# Process only favorite videos
+docker-compose run --rm emby-video-tagger favorites
+
+# Process a specific video by ID
+docker-compose run --rm emby-video-tagger manual <video_id>
+
+# Show processing statistics
+docker-compose run --rm emby-video-tagger stats
+```
+
+#### Direct Python Commands
 ```bash
 # Run with automatic scheduling (daily at 2 AM)
 python emby_video_tagger.py
@@ -39,6 +94,20 @@ python emby_video_tagger.py stats
 ```
 
 ### Testing and Development
+
+#### Docker Debugging
+```bash
+# Check logs for debugging
+docker-compose logs -f emby-video-tagger
+
+# Access container for debugging
+docker-compose exec emby-video-tagger bash
+
+# Run manual processing for debugging
+docker-compose run --rm emby-video-tagger manual <video_id>
+```
+
+#### Direct Python Debugging
 ```bash
 # Run manual processing for debugging
 python emby_video_tagger.py manual <video_id>

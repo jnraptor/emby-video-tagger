@@ -68,20 +68,22 @@ class EmbyVideoTagger:
         """
         try:
             # Replace Z with +00:00 for proper timezone handling
-            date_str = date_string.replace('Z', '+00:00')
-            
+            date_str = date_string.replace("Z", "+00:00")
+
             # Handle microseconds with more than 6 decimal places
             # Pattern: YYYY-MM-DDTHH:MM:SS.NNNNNNN+TZ or YYYY-MM-DDTHH:MM:SS.NNNNNNN-TZ
-            pattern = r'(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})\.(\d+)([\+\-]\d{2}:\d{2})$'
+            pattern = (
+                r"(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})\.(\d+)([\+\-]\d{2}:\d{2})$"
+            )
             match = re.match(pattern, date_str)
-            
+
             if match:
                 date_part, microseconds, timezone_part = match.groups()
                 # Truncate microseconds to 6 digits if longer
                 if len(microseconds) > 6:
                     microseconds = microseconds[:6]
                 date_str = f"{date_part}.{microseconds}{timezone_part}"
-            
+
             return datetime.fromisoformat(date_str)
         except ValueError as e:
             self.logger.error(f"Failed to parse datetime '{date_string}': {e}")
@@ -153,7 +155,7 @@ class EmbyVideoTagger:
             response = self.session.get(url, params=params, timeout=30)
             response.raise_for_status()
             items = response.json().get("Items", [])
-            
+
             self.logger.info(f"Retrieved {len(items)} favorite videos from Emby")
             return items
 
@@ -543,7 +545,7 @@ class VideoTaggingAutomation:
         """Initialize SQLite database for tracking processing tasks"""
         db_path = "video_tasks.db"
         conn = sqlite3.connect(db_path)
-        
+
         # Create table if it doesn't exist
         conn.execute(
             """
@@ -560,17 +562,21 @@ class VideoTaggingAutomation:
             )
         """
         )
-        
+
         # Check if source_type column exists and add it if missing (migration)
         cursor = conn.execute("PRAGMA table_info(video_tasks)")
         columns = [column[1] for column in cursor.fetchall()]
-        
-        if 'source_type' not in columns:
+
+        if "source_type" not in columns:
             self.logger.info("Migrating database: Adding source_type column")
-            conn.execute("ALTER TABLE video_tasks ADD COLUMN source_type TEXT DEFAULT 'recent'")
+            conn.execute(
+                "ALTER TABLE video_tasks ADD COLUMN source_type TEXT DEFAULT 'recent'"
+            )
             # Update existing records to have 'recent' as source_type
-            conn.execute("UPDATE video_tasks SET source_type = 'recent' WHERE source_type IS NULL")
-        
+            conn.execute(
+                "UPDATE video_tasks SET source_type = 'recent' WHERE source_type IS NULL"
+            )
+
         conn.commit()
         conn.close()
         return db_path
@@ -579,7 +585,7 @@ class VideoTaggingAutomation:
         """Configure APScheduler for automated processing"""
         # Use memory job store instead of SQLAlchemy to avoid pickling issues
         from apscheduler.jobstores.memory import MemoryJobStore
-        
+
         jobstores = {"default": MemoryJobStore()}
         executors = {"default": ThreadPoolExecutor(2)}  # Limit concurrent processing
         job_defaults = {"coalesce": True, "max_instances": 1}
@@ -601,7 +607,6 @@ class VideoTaggingAutomation:
         self.logger.info(f"Added new job '{job_id}'")
 
         return scheduler
-
 
     def _remap_video_path(self, emby_path: str) -> str:
         """Remap Emby server path to local machine path"""
@@ -650,7 +655,10 @@ class VideoTaggingAutomation:
                     f"Failed to process {source_type} video {video.get('Name', 'Unknown')}: {str(e)}"
                 )
                 self._update_task_status(
-                    video["Id"], TaskStatus.FAILED, error=str(e), source_type=source_type
+                    video["Id"],
+                    TaskStatus.FAILED,
+                    error=str(e),
+                    source_type=source_type,
                 )
 
         self.logger.info(
@@ -663,23 +671,27 @@ class VideoTaggingAutomation:
 
         try:
             videos_to_process = []
-            
+
             # Get videos based on configuration
             if self.favorites_only:
                 self.logger.info("Processing favorites only")
                 favorite_videos = self.emby_client.get_favorite_videos()
-                videos_to_process.extend([(video, "favorites") for video in favorite_videos])
+                videos_to_process.extend(
+                    [(video, "favorites") for video in favorite_videos]
+                )
             else:
                 # Get recently added videos
                 recent_videos = self.emby_client.get_recent_videos(days_back=days_back)
                 self.logger.info(f"Found {len(recent_videos)} recent videos")
                 videos_to_process.extend([(video, "recent") for video in recent_videos])
-                
+
                 # Optionally include favorites
                 if self.process_favorites:
                     self.logger.info("Including favorites in processing")
                     favorite_videos = self.emby_client.get_favorite_videos()
-                    videos_to_process.extend([(video, "favorites") for video in favorite_videos])
+                    videos_to_process.extend(
+                        [(video, "favorites") for video in favorite_videos]
+                    )
 
             self._process_video_list(videos_to_process)
 
@@ -696,7 +708,12 @@ class VideoTaggingAutomation:
         self.logger.info(f"Processing {source_type} video: {video_name}")
         self.logger.info(f"Original path: {emby_video_path}")
         self.logger.info(f"Remapped path: {video_path}")
-        self._update_task_status(video_id, TaskStatus.PROCESSING, file_path=video_path, source_type=source_type)
+        self._update_task_status(
+            video_id,
+            TaskStatus.PROCESSING,
+            file_path=video_path,
+            source_type=source_type,
+        )
 
         temp_dirs = []
 
@@ -758,36 +775,42 @@ class VideoTaggingAutomation:
         """Copy favorite video to destination folder if configured"""
         if not self.copy_favorites_to:
             return True  # No copy destination configured, skip silently
-        
+
         try:
             # Ensure destination directory exists
             dest_dir = Path(self.copy_favorites_to)
             dest_dir.mkdir(parents=True, exist_ok=True)
-            
+
             # Get source file info
             source_path = Path(video_path)
             if not source_path.exists():
-                self.logger.warning(f"Source video file not found for copy: {video_path}")
+                self.logger.warning(
+                    f"Source video file not found for copy: {video_path}"
+                )
                 return False
-            
+
             # Create destination path (flat structure)
             dest_path = dest_dir / source_path.name
-            
+
             # Check if file already exists
             if dest_path.exists():
                 # Compare file sizes to determine if it's the same file
                 if dest_path.stat().st_size == source_path.stat().st_size:
-                    self.logger.info(f"Video already exists in destination, skipping copy: {dest_path}")
+                    self.logger.info(
+                        f"Video already exists in destination, skipping copy: {dest_path}"
+                    )
                     return True
                 else:
-                    self.logger.warning(f"File exists but different size, overwriting: {dest_path}")
-            
+                    self.logger.warning(
+                        f"File exists but different size, overwriting: {dest_path}"
+                    )
+
             # Copy the file
             self.logger.info(f"Copying favorite video: {source_path} -> {dest_path}")
             shutil.copy2(source_path, dest_path)
             self.logger.info(f"Successfully copied favorite video to: {dest_path}")
             return True
-            
+
         except Exception as e:
             self.logger.error(f"Failed to copy favorite video {video_name}: {str(e)}")
             return False
@@ -1050,12 +1073,24 @@ def main():
             )
         else:
             print("Usage:")
-            print("  python emby_video_tagger.py                    # Run scheduled automation")
-            print("  python emby_video_tagger.py once               # Run once without scheduling")
-            print("  python emby_video_tagger.py once --include-favorites  # Run once including favorites")
-            print("  python emby_video_tagger.py favorites          # Process only favorite videos")
-            print("  python emby_video_tagger.py stats              # Show processing statistics")
-            print("  python emby_video_tagger.py manual <video_id>  # Process specific video")
+            print(
+                "  python emby_video_tagger.py                    # Run scheduled automation"
+            )
+            print(
+                "  python emby_video_tagger.py once               # Run once without scheduling"
+            )
+            print(
+                "  python emby_video_tagger.py once --include-favorites  # Run once including favorites"
+            )
+            print(
+                "  python emby_video_tagger.py favorites          # Process only favorite videos"
+            )
+            print(
+                "  python emby_video_tagger.py stats              # Show processing statistics"
+            )
+            print(
+                "  python emby_video_tagger.py manual <video_id>  # Process specific video"
+            )
     else:
         # Run with scheduling
         automation.run_scheduler()

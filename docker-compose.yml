@@ -1,0 +1,95 @@
+version: '3.8'
+
+services:
+  emby-video-tagger:
+    build: .
+    container_name: emby-video-tagger
+    restart: unless-stopped
+    environment:
+      # Emby Configuration
+      - EMBY_SERVER_URL=${EMBY_SERVER_URL}
+      - EMBY_API_KEY=${EMBY_API_KEY}
+      - EMBY_USER_ID=${EMBY_USER_ID}
+      
+      # AI Provider Configuration
+      - AI_PROVIDER=${AI_PROVIDER:-lmstudio}
+      
+      # LM Studio Configuration
+      - LMSTUDIO_MODEL_NAME=${LMSTUDIO_MODEL_NAME:-qwen2.5-vl-7b-instruct-abliterated}
+      
+      # Ollama Configuration
+      - OLLAMA_MODEL_NAME=${OLLAMA_MODEL_NAME:-qwen2.5vl:3b}
+      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://ollama:11434}
+      
+      # Path and Processing Configuration
+      - PATH_MAPPINGS=${PATH_MAPPINGS}
+      - DAYS_BACK=${DAYS_BACK:-5}
+      - PROCESS_FAVORITES=${PROCESS_FAVORITES:-false}
+      - FAVORITES_ONLY=${FAVORITES_ONLY:-false}
+      - COPY_FAVORITES_TO=${COPY_FAVORITES_TO}
+    volumes:
+      # Application data persistence
+      - ./data:/app/data
+      - ./logs:/app/logs
+      
+      # Media volumes (adjust paths as needed)
+      - /path/to/your/media:/media:ro
+      
+      # Optional: Mount .env file if not using environment variables
+      - ./.env:/app/.env:ro
+    networks:
+      - emby-network
+    depends_on:
+      - ollama  # Remove this line if not using Ollama
+    
+    # Runtime options for GPU access (uncomment if using CUDA)
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]
+
+  # Optional: Ollama service (remove if using external Ollama or LM Studio)
+  ollama:
+    image: ollama/ollama:latest
+    container_name: ollama
+    restart: unless-stopped
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama-data:/root/.ollama
+    networks:
+      - emby-network
+    
+    # Uncomment for GPU support
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]
+
+  # Optional: LM Studio alternative (if you prefer containerized LM Studio)
+  # Note: LM Studio doesn't have an official Docker image, so this is just a placeholder
+  # You would typically run LM Studio on the host or another machine
+  # lmstudio:
+  #   image: your-custom-lmstudio-image
+  #   container_name: lmstudio
+  #   restart: unless-stopped
+  #   ports:
+  #     - "1234:1234"
+  #   volumes:
+  #     - lmstudio-data:/app/models
+  #   networks:
+  #     - emby-network
+
+volumes:
+  ollama-data:
+  # lmstudio-data:
+
+networks:
+  emby-network:
+    driver: bridge

@@ -23,18 +23,58 @@ An automated video tagging system for Emby media server that uses AI vision anal
 
 ## Installation
 
+You can run this application either with Docker (recommended) or directly with Python.
+
+### Option 1: Docker Installation (Recommended)
+
+Docker provides an isolated environment with all dependencies pre-configured, including OpenCV with CUDA support.
+
 1. **Clone the repository**:
    ```bash
    git clone <repository-url>
-   cd auto-video-tagging
+   cd emby-video-tagger
    ```
 
-2. **Install dependencies**:
+2. **Configure environment**:
+   ```bash
+   cp .env.example .env
+   # Edit .env with your settings (see Configuration section)
+   ```
+
+3. **Update docker-compose.yml**:
+   - Edit the media volume path: `/path/to/your/media:/media:ro`
+   - Uncomment GPU sections if you have NVIDIA GPU support
+   - Remove ollama service if using external AI provider
+
+4. **Build and run**:
+   ```bash
+   # Start with scheduling (runs daily at 2 AM)
+   docker-compose up -d
+   
+   # Or run once and exit
+   docker-compose run --rm emby-video-tagger once
+   ```
+
+### Option 2: Direct Python Installation
+
+1. **Clone the repository**:
+   ```bash
+   git clone <repository-url>
+   cd emby-video-tagger
+   ```
+
+2. **Create virtual environment**:
+   ```bash
+   python -m venv .venv
+   source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+   ```
+
+3. **Install dependencies**:
    ```bash
    pip install -r requirements.txt
    ```
 
-3. **Install FFmpeg** (required for video processing):
+4. **Install FFmpeg** (required for video processing):
    - **Windows**: Download from [FFmpeg website](https://ffmpeg.org/download.html)
    - **macOS**: `brew install ffmpeg`
    - **Linux**: `sudo apt-get install ffmpeg` (Ubuntu/Debian) or `sudo yum install ffmpeg` (CentOS/RHEL)
@@ -100,7 +140,50 @@ You can choose between two AI providers for video frame analysis:
 
 ## Usage
 
-### Manual Processing
+### Docker Usage
+
+#### Automated Processing (Recommended)
+```bash
+# Start with scheduling (runs daily at 2 AM)
+docker-compose up -d
+
+# View logs
+docker-compose logs -f emby-video-tagger
+```
+
+#### Manual Processing
+```bash
+# Process recent videos once
+docker-compose run --rm emby-video-tagger once
+
+# Process recent videos including favorites
+docker-compose run --rm emby-video-tagger once --include-favorites
+
+# Process only favorite videos
+docker-compose run --rm emby-video-tagger favorites
+
+# Process a specific video by ID
+docker-compose run --rm emby-video-tagger manual <video_id>
+
+# Show processing statistics
+docker-compose run --rm emby-video-tagger stats
+```
+
+#### Management Commands
+```bash
+# Stop the service
+docker-compose down
+
+# Rebuild after code changes
+docker-compose build
+
+# View container status
+docker-compose ps
+```
+
+### Direct Python Usage
+
+#### Manual Processing
 
 Process a specific video by ID:
 ```bash
@@ -112,7 +195,22 @@ Process recent videos (last 5 days):
 python emby_video_tagger.py once
 ```
 
-### Automated Processing
+Process recent videos including favorites:
+```bash
+python emby_video_tagger.py once --include-favorites
+```
+
+Process only favorite videos:
+```bash
+python emby_video_tagger.py favorites
+```
+
+Show processing statistics:
+```bash
+python emby_video_tagger.py stats
+```
+
+#### Automated Processing
 
 The system can run as a scheduled service to automatically process new videos:
 
