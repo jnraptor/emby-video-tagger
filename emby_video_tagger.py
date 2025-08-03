@@ -146,7 +146,7 @@ class EmbyVideoTagger:
             "IncludeItemTypes": "Video",
             "Fields": "Tags,TagItems,Genres,ProviderIds,Path,DateCreated",
             "IsFavorite": "true",
-            "Limit": 1000,
+            "Limit": 2,
         }
 
         try:
@@ -525,6 +525,7 @@ class VideoTaggingAutomation:
         self.days_back = config.get("days_back", 5)
         self.process_favorites = config.get("process_favorites", False)
         self.favorites_only = config.get("favorites_only", False)
+        self.copy_favorites_to = config.get("copy_favorites_to", "")
 
     def _setup_logging(self):
         """Configure logging for the application"""
@@ -721,6 +722,12 @@ class VideoTaggingAutomation:
                     )
                 else:
                     raise ValueError("Failed to update tags in Emby")
+                    
+                # Copy favorite video if configured and source_type is favorites
+                if source_type == "favorites":
+                    copy_success = self._copy_favorite_video(video_path, video_name)
+                    if not copy_success:
+                        self.logger.warning(f"Tag update succeeded but copy failed for {video_name}")
             else:
                 raise ValueError("No tags generated from analysis")
 
@@ -741,6 +748,44 @@ class VideoTaggingAutomation:
                     self.logger.warning(
                         f"Failed to clean up temp directory {temp_dir}: {e}"
                     )
+
+    def _copy_favorite_video(self, video_path: str, video_name: str) -> bool:
+        """Copy favorite video to destination folder if configured"""
+        if not self.copy_favorites_to:
+            return True  # No copy destination configured, skip silently
+        
+        try:
+            # Ensure destination directory exists
+            dest_dir = Path(self.copy_favorites_to)
+            dest_dir.mkdir(parents=True, exist_ok=True)
+            
+            # Get source file info
+            source_path = Path(video_path)
+            if not source_path.exists():
+                self.logger.warning(f"Source video file not found for copy: {video_path}")
+                return False
+            
+            # Create destination path (flat structure)
+            dest_path = dest_dir / source_path.name
+            
+            # Check if file already exists
+            if dest_path.exists():
+                # Compare file sizes to determine if it's the same file
+                if dest_path.stat().st_size == source_path.stat().st_size:
+                    self.logger.info(f"Video already exists in destination, skipping copy: {dest_path}")
+                    return True
+                else:
+                    self.logger.warning(f"File exists but different size, overwriting: {dest_path}")
+            
+            # Copy the file
+            self.logger.info(f"Copying favorite video: {source_path} -> {dest_path}")
+            shutil.copy2(source_path, dest_path)
+            self.logger.info(f"Successfully copied favorite video to: {dest_path}")
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"Failed to copy favorite video {video_name}: {str(e)}")
+            return False
 
     def _should_process_video(self, video: Dict) -> bool:
         """Determine if video needs processing"""
@@ -970,6 +1015,7 @@ def main():
         "days_back": int(os.getenv("DAYS_BACK", "5")),
         "process_favorites": os.getenv("PROCESS_FAVORITES", "false").lower() == "true",
         "favorites_only": os.getenv("FAVORITES_ONLY", "false").lower() == "true",
+        "copy_favorites_to": os.getenv("COPY_FAVORITES_TO", "").strip(),
     }
 
     # Validate configuration
