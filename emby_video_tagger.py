@@ -620,6 +620,43 @@ class VideoTaggingAutomation:
         self.logger.warning(f"No path mapping found for: {emby_path}")
         return emby_path
 
+    def _process_video_list(self, videos_to_process: List[Tuple[Dict, str]]):
+        """Helper function to process a list of videos"""
+        self.logger.info(f"Total videos to process: {len(videos_to_process)}")
+        successful_processes = 0
+
+        for video, source_type in videos_to_process:
+            self.logger.info(
+                f"Processing {source_type} video: {video.get('Name', 'Unknown')} with id {video['Id']}"
+            )
+            try:
+                if self._should_process_video(video):
+                    success = self._process_single_video(video, source_type)
+                    if success:
+                        successful_processes += 1
+
+                    # Add delay between videos to avoid overwhelming the system
+                    time.sleep(2)
+
+                # If the video is a favorite, attempt to copy it regardless of processed status
+                if source_type == "favorites":
+                    emby_video_path = video["Path"]
+                    video_path = self._remap_video_path(emby_video_path)
+                    video_name = video.get("Name", "Unknown")
+                    self._copy_favorite_video(video_path, video_name)
+
+            except Exception as e:
+                self.logger.error(
+                    f"Failed to process {source_type} video {video.get('Name', 'Unknown')}: {str(e)}"
+                )
+                self._update_task_status(
+                    video["Id"], TaskStatus.FAILED, error=str(e), source_type=source_type
+                )
+
+        self.logger.info(
+            f"Completed processing: {successful_processes}/{len(videos_to_process)} successful"
+        )
+
     def process_daily_videos(self, days_back: int = 5):
         """Main automation function - processes recent videos and optionally favorites"""
         self.logger.info("Starting daily video processing")
@@ -644,40 +681,7 @@ class VideoTaggingAutomation:
                     favorite_videos = self.emby_client.get_favorite_videos()
                     videos_to_process.extend([(video, "favorites") for video in favorite_videos])
 
-            self.logger.info(f"Total videos to process: {len(videos_to_process)}")
-            successful_processes = 0
-
-            for video, source_type in videos_to_process:
-                self.logger.info(
-                    f"Processing {source_type} video: {video.get('Name', 'Unknown')} with id {video['Id']}"
-                )
-                try:
-                    if self._should_process_video(video):
-                        success = self._process_single_video(video, source_type)
-                        if success:
-                            successful_processes += 1
-
-                        # Add delay between videos to avoid overwhelming the system
-                        time.sleep(2)
-
-                    # If the video is a favorite, attempt to copy it regardless of processed status
-                    if source_type == "favorites":
-                        emby_video_path = video["Path"]
-                        video_path = self._remap_video_path(emby_video_path)
-                        video_name = video.get("Name", "Unknown")
-                        self._copy_favorite_video(video_path, video_name)
-
-                except Exception as e:
-                    self.logger.error(
-                        f"Failed to process {source_type} video {video.get('Name', 'Unknown')}: {str(e)}"
-                    )
-                    self._update_task_status(
-                        video["Id"], TaskStatus.FAILED, error=str(e), source_type=source_type
-                    )
-
-            self.logger.info(
-                f"Completed daily processing: {successful_processes}/{len(videos_to_process)} successful"
-            )
+            self._process_video_list(videos_to_process)
 
         except Exception as e:
             self.logger.error(f"Daily processing failed: {str(e)}")
@@ -871,38 +875,8 @@ class VideoTaggingAutomation:
             favorite_videos = self.emby_client.get_favorite_videos()
             self.logger.info(f"Found {len(favorite_videos)} favorite videos")
 
-            successful_processes = 0
-
-            for video in favorite_videos:
-                self.logger.info(
-                    f"Processing favorite video: {video.get('Name', 'Unknown')} with id {video['Id']}"
-                )
-                try:
-                    if self._should_process_video(video):
-                        success = self._process_single_video(video, "favorites")
-                        if success:
-                            successful_processes += 1
-
-                        # Add delay between videos to avoid overwhelming the system
-                        time.sleep(2)
-
-                    # Attempt to copy the favorite video, regardless of processed status
-                    emby_video_path = video["Path"]
-                    video_path = self._remap_video_path(emby_video_path)
-                    video_name = video.get("Name", "Unknown")
-                    self._copy_favorite_video(video_path, video_name)
-
-                except Exception as e:
-                    self.logger.error(
-                        f"Failed to process favorite video {video.get('Name', 'Unknown')}: {str(e)}"
-                    )
-                    self._update_task_status(
-                        video["Id"], TaskStatus.FAILED, error=str(e), source_type="favorites"
-                    )
-
-            self.logger.info(
-                f"Completed favorite processing: {successful_processes}/{len(favorite_videos)} successful"
-            )
+            videos_to_process = [(video, "favorites") for video in favorite_videos]
+            self._process_video_list(videos_to_process)
 
         except Exception as e:
             self.logger.error(f"Favorite processing failed: {str(e)}")
