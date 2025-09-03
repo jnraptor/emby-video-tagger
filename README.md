@@ -1,13 +1,13 @@
 # Auto Video Tagging for Emby
 
-An automated video tagging system for Emby media server that uses AI vision analysis to generate intelligent tags for your video content. The system extracts representative frames from videos, analyzes them using local LM Studio models, and automatically updates Emby metadata with descriptive tags.
+An automated video tagging system for Emby media server that uses AI vision analysis to generate intelligent tags for your video content. The system extracts representative frames from videos, analyzes them using AI models (LM Studio, Ollama, or Z.AI API), and automatically updates Emby metadata with descriptive tags.
 
 ## Features
 
 - **Automated Video Processing**: Automatically processes recently added videos in your Emby library
-- **AI-Powered Analysis**: Uses local LM Studio models for intelligent content analysis
+- **AI-Powered Analysis**: Uses LM Studio, Ollama, or Z.AI API for intelligent content analysis
 - **Smart Frame Extraction**: Intelligently extracts representative frames using scene detection
-- **Flexible Configuration**: Support for local (LM Studio) AI models
+- **Flexible Configuration**: Support for local (LM Studio, Ollama) and cloud-based (Z.AI API) AI models
 - **Robust Error Handling**: Comprehensive error handling with retry mechanisms
 - **Task Tracking**: SQLite-based task tracking to prevent duplicate processing
 - **Scheduled Processing**: Built-in scheduling for automated daily processing
@@ -19,6 +19,8 @@ An automated video tagging system for Emby media server that uses AI vision anal
 - Python 3.8+
 - Emby Media Server
 - LM Studio (for local processing)
+- Ollama (for local processing)
+- Z.AI API (for cloud-based processing)
 - FFmpeg (for video frame extraction)
 
 ## Installation
@@ -55,7 +57,7 @@ An automated video tagging system for Emby media server that uses AI vision anal
    EMBY_USER_ID=your-emby-user-id-here
 
    # AI Provider Configuration (choose one)
-   AI_PROVIDER=lmstudio  # or "ollama"
+   AI_PROVIDER=lmstudio  # or "ollama", or "api"
 
    # LM Studio Configuration (if using LM Studio)
    LMSTUDIO_MODEL_NAME=qwen2.5-vl-7b-instruct-abliterated
@@ -63,6 +65,11 @@ An automated video tagging system for Emby media server that uses AI vision anal
    # Ollama Configuration (if using Ollama)
    OLLAMA_MODEL_NAME=llava
    OLLAMA_BASE_URL=http://localhost:11434
+
+   # Z.AI API Configuration (if using Z.AI API)
+   API_MODEL_NAME=glm-4.5v
+   API_BASE_URL=https://api.z.ai/api/paas/v4/chat/completions
+   API_AUTH_TOKEN=your-zai-api-key-here
 
    # Path Mappings
    # Format: /source_path:/destination_path
@@ -84,7 +91,7 @@ An automated video tagging system for Emby media server that uses AI vision anal
 
 ### AI Model Options
 
-You can choose between two AI providers for video frame analysis:
+You can choose between three AI providers for video frame analysis:
 
 **Option 1: LM Studio (Default)**
 - Install [LM Studio](https://lmstudio.ai/)
@@ -97,6 +104,11 @@ You can choose between two AI providers for video frame analysis:
 - Download a vision model: `ollama pull llava` or `ollama pull llama3.2-vision`
 - Start the Ollama server: `ollama serve`
 - Set `AI_PROVIDER=ollama` and `OLLAMA_MODEL_NAME` in your `.env` file
+
+**Option 3: Z.AI API**
+- Sign up for a Z.AI account at [https://z.ai](https://z.ai)
+- Get your API key from the dashboard
+- Set `AI_PROVIDER=api`, `API_AUTH_TOKEN`, and optionally `API_MODEL_NAME` in your `.env` file
 
 ## Usage
 
@@ -190,7 +202,7 @@ logging.basicConfig(level=logging.DEBUG)
 ## Acknowledgments
 
 - [Emby Media Server](https://emby.media/) for the excellent media server platform
-- [LM Studio](https://lmstudio.ai/) or [Ollama](https://ollama.ai/) for local AI model hosting
+- [LM Studio](https://lmstudio.ai/), [Ollama](https://ollama.ai/), or [Z.AI](https://z.ai) for AI model hosting
 - [PySceneDetect](https://scenedetect.com/) for intelligent frame extraction
 
 ## Support
