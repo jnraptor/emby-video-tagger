@@ -146,7 +146,7 @@ class EmbyVideoTagger:
             "IncludeItemTypes": "Video",
             "Fields": "Tags,TagItems,Genres,ProviderIds,Path,DateCreated",
             "IsFavorite": "true",
-            "Limit": 2,
+            "Limit": 1000,
         }
 
         try:
@@ -754,6 +754,31 @@ class VideoTaggingAutomation:
                         f"Failed to clean up temp directory {temp_dir}: {e}"
                     )
 
+    def _sanitize_filename(self, filename: str) -> str:
+        """Sanitize filename by replacing special characters that may cause issues"""
+        # Dictionary of characters to replace
+        char_replacements = {
+            '|': '-',
+            '<': '-',
+            '>': '-',
+            ':': '-',
+            '"': "'",
+            '/': '-',
+            '\\': '-',
+            '?': '',
+            '*': '',
+        }
+        
+        sanitized = filename
+        for char, replacement in char_replacements.items():
+            sanitized = sanitized.replace(char, replacement)
+        
+        # Remove multiple consecutive dashes and clean up
+        sanitized = re.sub(r'-+', '-', sanitized)
+        sanitized = sanitized.strip('- ')
+        
+        return sanitized
+
     def _copy_favorite_video(self, video_path: str, video_name: str) -> bool:
         """Copy favorite video to destination folder if configured"""
         if not self.copy_favorites_to:
@@ -770,8 +795,16 @@ class VideoTaggingAutomation:
                 self.logger.warning(f"Source video file not found for copy: {video_path}")
                 return False
             
-            # Create destination path (flat structure)
-            dest_path = dest_dir / source_path.name
+            # Create destination path with sanitized filename (flat structure)
+            sanitized_filename = self._sanitize_filename(source_path.name)
+            dest_path = dest_dir / sanitized_filename
+            orig_dest_path = dest_dir / source_path.name
+            
+            # Log filename sanitization if it changed
+            if sanitized_filename != source_path.name:
+                self.logger.info(f"Sanitized filename: '{source_path.name}' -> '{sanitized_filename}'")
+                if orig_dest_path.exists():
+                    os.remove(orig_dest_path)
             
             # Check if file already exists
             if dest_path.exists():
