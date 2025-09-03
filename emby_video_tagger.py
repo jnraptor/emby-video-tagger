@@ -482,6 +482,107 @@ class OllamaVisionProcessor(BaseVisionProcessor):
         return list(set(all_tags))
 
 
+class APIVisionProcessor(BaseVisionProcessor):
+    """Handles Z.AI API interactions for video frame analysis"""
+
+    def __init__(
+        self, model_name: str = "glm-4.5v", base_url: str = "https://api.z.ai/api/paas/v4/chat/completions", auth_token: str = None
+    ):
+        super().__init__(model_name)
+        self.base_url = base_url
+        self.auth_token = auth_token
+        self.headers = {
+            "Authorization": f"Bearer {auth_token}",
+            "Accept-Language": "en-US,en",
+            "Content-Type": "application/json"
+        }
+
+    def analyze_frames_sync(self, frame_paths: List[str]) -> List[str]:
+        """Synchronous frame analysis for immediate processing using Z.AI API"""
+        all_tags = []
+
+        for frame_path in frame_paths:
+            try:
+                # Encode image as base64
+                image_data = self.encode_image(frame_path)
+                if not image_data:
+                    continue
+
+                # Create API request payload
+                payload = {
+                    "model": self.model_name,
+                    "messages": [
+                        {
+                            "role": "user",
+                            "content": [
+                                {
+                                    "type": "image_url",
+                                    "image_url": {
+                                        "url": f"data:image/jpeg;base64,{image_data}"
+                                    }
+                                },
+                                {
+                                    "type": "text",
+                                    "text": self.tag_prompt
+                                }
+                            ]
+                        }
+                    ],
+                    "thinking": {
+                        "type": "enabled"
+                    }
+                }
+
+                # Make API request
+                import requests
+                response = requests.post(self.base_url, headers=self.headers, json=payload)
+                
+                # Check for error response
+                if response.status_code != 200:
+                    try:
+                        error_data = response.json()
+                        self.logger.error(
+                            f"API error for {frame_path}: Status {response.status_code}, "
+                            f"Response: {error_data}"
+                        )
+                    except:
+                        self.logger.error(
+                            f"API error for {frame_path}: Status {response.status_code}, "
+                            f"Response: {response.text}"
+                        )
+                    continue
+                
+                # Parse response
+                response_data = response.json()
+                analysis = response_data["choices"][0]["message"]["content"]
+
+                try:
+                    # Extract JSON from markdown code blocks if present
+                    json_content = self._extract_json_from_response(analysis)
+                    parsed_tags = json.loads(json_content)
+
+                    # Flatten all tag categories into a single list
+                    frame_tags = []
+                    for category, tags in parsed_tags.items():
+                        if isinstance(tags, list):
+                            frame_tags.extend(tags)
+                    all_tags.extend(frame_tags)
+
+                except json.JSONDecodeError as e:
+                    self.logger.warning(
+                        f"Failed to parse JSON response for {frame_path}: {analysis}"
+                    )
+                    self.logger.debug(f"JSON decode error: {e}")
+
+            except Exception as e:
+                self.logger.error(
+                    f"Failed to analyze frame {frame_path} with Z.AI API: {e}"
+                )
+
+        # Remove duplicates and return unique tags
+        return list(set(all_tags))
+
+
 class VisionProcessorFactory:
     """Factory class for creating vision processor instances"""
 
@@ -495,9 +596,16 @@ class VisionProcessorFactory:
             model_name = config.get("model_name", "llava")
             base_url = config.get("base_url", "http://localhost:11434")
             return OllamaVisionProcessor(model_name, base_url)
+        elif provider.lower() == "api":
+            model_name = config.get("model_name", "glm-4.5v")
+            base_url = config.get("base_url", "https://api.z.ai/api/paas/v4/chat/completions")
+            auth_token = config.get("auth_token")
+            if not auth_token:
+                raise ValueError("auth_token is required for API provider")
+            return APIVisionProcessor(model_name, base_url, auth_token)
         else:
             raise ValueError(
-                f"Unsupported AI provider: {provider}. Supported providers: lmstudio, ollama"
+                f"Unsupported AI provider: {provider}. Supported providers: lmstudio, ollama, api"
             )
 
 
@@ -1024,6 +1132,11 @@ def main():
         "ollama": {
             "model_name": os.getenv("OLLAMA_MODEL_NAME", "llava"),
             "base_url": os.getenv("OLLAMA_BASE_URL", "http://localhost:11434"),
+        },
+        "api": {
+            "model_name": os.getenv("API_MODEL_NAME", "glm-4.5v"),
+            "base_url": os.getenv("API_BASE_URL", "https://api.z.ai/api/paas/v4/chat/completions"),
+            "auth_token": os.getenv("API_AUTH_TOKEN"),
         },
         "path_mappings": path_mappings,
         "days_back": int(os.getenv("DAYS_BACK", "5")),

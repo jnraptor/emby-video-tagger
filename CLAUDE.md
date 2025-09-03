@@ -69,7 +69,8 @@ This is an automated video tagging system for Emby media servers that uses AI vi
    - **BaseVisionProcessor** (`emby_video_tagger.py:257-319`): Abstract base class defining common interface
    - **LMStudioVisionProcessor** (`emby_video_tagger.py:322-366`): LM Studio integration
    - **OllamaVisionProcessor** (`emby_video_tagger.py:369-425`): Ollama integration
-   - **VisionProcessorFactory** (`emby_video_tagger.py:428-442`): Creates appropriate processor based on configuration
+   - **APIVisionProcessor** (`emby_video_tagger.py:428-499`): Z.AI API integration
+   - **VisionProcessorFactory** (`emby_video_tagger.py:572-595`): Creates appropriate processor based on configuration
    - All processors handle JSON response parsing and tag category flattening
 
 4. **VideoTaggingAutomation** (`emby_video_tagger.py:504-843`): Main orchestration class
@@ -93,9 +94,10 @@ This is an automated video tagging system for Emby media servers that uses AI vi
 ### External Dependencies
 
 - **Emby Media Server**: Source of video metadata and file information
-- **AI Providers**: Local AI model hosting for vision analysis
-  - **LM Studio**: Primary option with qwen2.5-vl models
-  - **Ollama**: Alternative with llava/llama3.2-vision models
+- **AI Providers**: Vision analysis through multiple provider options
+  - **LM Studio**: Local option with qwen2.5-vl models
+  - **Ollama**: Local alternative with llava/llama3.2-vision models
+  - **Z.AI API**: Cloud-based option with glm-4.5v model
 - **FFmpeg**: Video processing (via OpenCV) for frame extraction
 - **PySceneDetect**: Intelligent scene detection for frame selection
 
@@ -103,9 +105,10 @@ This is an automated video tagging system for Emby media servers that uses AI vi
 
 Environment variables (via `.env` file):
 - `EMBY_SERVER_URL`, `EMBY_API_KEY`, `EMBY_USER_ID`: Emby server connection
-- `AI_PROVIDER`: Choose between "lmstudio" or "ollama" (default: "lmstudio")
+- `AI_PROVIDER`: Choose between "lmstudio", "ollama", or "api" (default: "lmstudio")
 - `LMSTUDIO_MODEL_NAME`: LM Studio model specification
 - `OLLAMA_MODEL_NAME`, `OLLAMA_BASE_URL`: Ollama configuration
+- `API_MODEL_NAME`, `API_BASE_URL`, `API_AUTH_TOKEN`: Z.AI API configuration
 - `PATH_MAPPINGS`: Cross-platform path translation
 - `DAYS_BACK`: Processing window for recent videos
 - `PROCESS_FAVORITES`: Include favorites in scheduled processing (default: false)
@@ -124,7 +127,7 @@ Environment variables (via `.env` file):
    - Or both, depending on settings
 2. Filter videos (skip already processed, check file existence/size)
 3. Extract representative frames using scene detection
-4. Analyze frames with selected AI provider (LM Studio or Ollama) to generate tags
+4. Analyze frames with selected AI provider (LM Studio, Ollama, or Z.AI API) to generate tags
 5. Update Emby metadata with generated tags plus "ai-generated" marker
 6. Log results with source type tracking and clean up temporary files
 
@@ -132,6 +135,6 @@ Environment variables (via `.env` file):
 
 The system uses a factory pattern to select the appropriate AI processor:
 - Configuration determines provider via `AI_PROVIDER` environment variable
-- Factory creates either `LMStudioVisionProcessor` or `OllamaVisionProcessor`
-- Both processors implement the same `BaseVisionProcessor` interface
+- Factory creates `LMStudioVisionProcessor`, `OllamaVisionProcessor`, or `APIVisionProcessor`
+- All processors implement the same `BaseVisionProcessor` interface
 - Switching providers requires only configuration changes, no code modifications
