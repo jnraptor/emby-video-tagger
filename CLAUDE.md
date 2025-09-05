@@ -66,12 +66,12 @@ This is an automated video tagging system for Emby media servers that uses AI vi
    - Creates temporary directories for frame storage
 
 3. **Vision Processing Architecture** (Factory Pattern):
-   - **BaseVisionProcessor** (`emby_video_tagger.py:257-319`): Abstract base class defining common interface
-   - **LMStudioVisionProcessor** (`emby_video_tagger.py:322-366`): LM Studio integration
-   - **OllamaVisionProcessor** (`emby_video_tagger.py:369-425`): Ollama integration
-   - **APIVisionProcessor** (`emby_video_tagger.py:428-499`): Z.AI API integration
-   - **VisionProcessorFactory** (`emby_video_tagger.py:572-595`): Creates appropriate processor based on configuration
-   - All processors handle JSON response parsing and tag category flattening
+   - **BaseVisionProcessor** (`emby_video_tagger.py:310-400`): Abstract base class defining common interface with parallel processing support
+   - **LMStudioVisionProcessor** (`emby_video_tagger.py:403-447`): LM Studio integration with configurable parallel requests
+   - **OllamaVisionProcessor** (`emby_video_tagger.py:450-511`): Ollama integration with rate limiting and parallel processing
+   - **APIVisionProcessor** (`emby_video_tagger.py:514-612`): Z.AI API integration with parallel request handling
+   - **VisionProcessorFactory** (`emby_video_tagger.py:615-641`): Creates appropriate processor based on configuration
+   - All processors handle JSON response parsing, tag category flattening, and parallel frame processing
 
 4. **VideoTaggingAutomation** (`emby_video_tagger.py:504-843`): Main orchestration class
    - Coordinates the entire tagging pipeline
@@ -90,6 +90,10 @@ This is an automated video tagging system for Emby media servers that uses AI vi
 - **Comprehensive Logging**: Detailed logging to `video_tagging.log` with source type identification
 - **Error Recovery**: Robust error handling with retry mechanisms
 - **Temporary File Management**: Automatic cleanup of extracted frame files
+- **Parallel Processing**: Configurable concurrent frame analysis for improved performance
+  - **LM Studio**: Default 2 concurrent requests (optimized for local processing)
+  - **Ollama**: Default 1 concurrent request (respects built-in rate limiting)
+  - **Z.AI API**: Default 3 concurrent requests (optimized for cloud API throughput)
 
 ### External Dependencies
 
@@ -107,8 +111,11 @@ Environment variables (via `.env` file):
 - `EMBY_SERVER_URL`, `EMBY_API_KEY`, `EMBY_USER_ID`: Emby server connection
 - `AI_PROVIDER`: Choose between "lmstudio", "ollama", or "api" (default: "lmstudio")
 - `LMSTUDIO_MODEL_NAME`: LM Studio model specification
+- `LMSTUDIO_MAX_CONCURRENT`: Maximum concurrent requests for LM Studio (default: 2)
 - `OLLAMA_MODEL_NAME`, `OLLAMA_BASE_URL`: Ollama configuration
+- `OLLAMA_MAX_CONCURRENT`: Maximum concurrent requests for Ollama (default: 1)
 - `API_MODEL_NAME`, `API_BASE_URL`, `API_AUTH_TOKEN`: Z.AI API configuration
+- `API_MAX_CONCURRENT`: Maximum concurrent requests for Z.AI API (default: 3)
 - `PATH_MAPPINGS`: Cross-platform path translation
 - `DAYS_BACK`: Processing window for recent videos
 - `PROCESS_FAVORITES`: Include favorites in scheduled processing (default: false)

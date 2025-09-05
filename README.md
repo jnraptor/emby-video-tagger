@@ -7,6 +7,7 @@ An automated video tagging system for Emby media server that uses AI vision anal
 - **Automated Video Processing**: Automatically processes recently added videos in your Emby library
 - **AI-Powered Analysis**: Uses LM Studio, Ollama, or Z.AI API for intelligent content analysis
 - **Smart Frame Extraction**: Intelligently extracts representative frames using scene detection
+- **Parallel Processing**: Configurable concurrent frame analysis for improved performance
 - **Flexible Configuration**: Support for local (LM Studio, Ollama) and cloud-based (Z.AI API) AI models
 - **Robust Error Handling**: Comprehensive error handling with retry mechanisms
 - **Task Tracking**: SQLite-based task tracking to prevent duplicate processing
@@ -61,15 +62,18 @@ An automated video tagging system for Emby media server that uses AI vision anal
 
    # LM Studio Configuration (if using LM Studio)
    LMSTUDIO_MODEL_NAME=qwen2.5-vl-7b-instruct-abliterated
+   LMSTUDIO_MAX_CONCURRENT=2
 
    # Ollama Configuration (if using Ollama)
    OLLAMA_MODEL_NAME=llava
    OLLAMA_BASE_URL=http://localhost:11434
+   OLLAMA_MAX_CONCURRENT=1
 
    # Z.AI API Configuration (if using Z.AI API)
    API_MODEL_NAME=glm-4.5v
    API_BASE_URL=https://api.z.ai/api/paas/v4/chat/completions
    API_AUTH_TOKEN=your-zai-api-key-here
+   API_MAX_CONCURRENT=3
 
    # Path Mappings
    # Format: /source_path:/destination_path
@@ -143,6 +147,25 @@ This will:
 The system supports various configuration options through environment variables:
 
 - `DAYS_BACK`: Number of days to look back for new videos (default: 5)
+
+### Parallel Processing Configuration
+
+The system supports parallel processing of video frames to improve performance. You can configure the number of concurrent requests for each AI provider:
+
+- `LMSTUDIO_MAX_CONCURRENT`: Number of concurrent requests for LM Studio (default: 2)
+- `OLLAMA_MAX_CONCURRENT`: Number of concurrent requests for Ollama (default: 1)
+- `API_MAX_CONCURRENT`: Number of concurrent requests for Z.AI API (default: 3)
+
+**Performance Considerations**:
+- Higher values result in faster processing but consume more system resources
+- LM Studio: Increase based on your system's CPU/GPU capabilities
+- Ollama: Keep at 1 due to built-in rate limiting
+- Z.AI API: Can be increased for better throughput, but monitor API usage limits
+
+**Example Performance Gains**:
+- Sequential processing (5 frames): ~30-60 seconds
+- With default parallel settings: ~15-30 seconds (2-3x improvement)
+- With optimized settings: ~10-20 seconds (3-6x improvement)
 
 ## Path Mapping
 

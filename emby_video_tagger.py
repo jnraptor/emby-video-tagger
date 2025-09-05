@@ -49,6 +49,7 @@ import shutil
 from dotenv import load_dotenv
 from abc import ABC, abstractmethod
 import re
+import concurrent.futures
 
 
 class TaskStatus(Enum):
@@ -309,8 +310,9 @@ class IntelligentFrameExtractor:
 class BaseVisionProcessor(ABC):
     """Abstract base class for AI vision processors"""
 
-    def __init__(self, model_name: str):
+    def __init__(self, model_name: str, max_concurrent_requests: int = 1):
         self.model_name = model_name
+        self.max_concurrent_requests = max_concurrent_requests
         self.tag_prompt = self._create_tagging_prompt()
         self.logger = logging.getLogger(__name__)
 
@@ -365,6 +367,33 @@ class BaseVisionProcessor(ABC):
         # If no JSON found, return the original text
         return response_text.strip()
 
+    def _process_frames_parallel(self, frame_paths: List[str], process_func) -> List[str]:
+        """Process frames in parallel using ThreadPoolExecutor"""
+        all_tags = []
+        
+        if self.max_concurrent_requests <= 1 or len(frame_paths) <= 1:
+            # Sequential processing for single frame or disabled parallel processing
+            for frame_path in frame_paths:
+                tags = process_func(frame_path)
+                all_tags.extend(tags)
+        else:
+            # Parallel processing
+            with concurrent.futures.ThreadPoolExecutor(max_workers=self.max_concurrent_requests) as executor:
+                # Submit all tasks
+                future_to_frame = {executor.submit(process_func, frame_path): frame_path for frame_path in frame_paths}
+                
+                # Collect results as they complete
+                for future in concurrent.futures.as_completed(future_to_frame):
+                    frame_path = future_to_frame[future]
+                    try:
+                        tags = future.result()
+                        all_tags.extend(tags)
+                    except Exception as e:
+                        self.logger.error(f"Failed to process frame {frame_path}: {e}")
+        
+        # Remove duplicates and return unique tags
+        return list(set(all_tags))
+
     @abstractmethod
     def analyze_frames_sync(self, frame_paths: List[str]) -> List[str]:
         """Synchronous frame analysis for immediate processing"""
@@ -374,121 +403,121 @@ class BaseVisionProcessor(ABC):
 class LMStudioVisionProcessor(BaseVisionProcessor):
     """Handles LMStudio Vision API interactions for video frame analysis"""
 
-    def __init__(self, model_name: str = "qwen2.5-vl-7b-instruct-abliterated"):
-        super().__init__(model_name)
+    def __init__(self, model_name: str = "qwen2.5-vl-7b-instruct-abliterated", max_concurrent_requests: int = 2):
+        super().__init__(model_name, max_concurrent_requests)
+
+    def _process_single_frame(self, frame_path: str) -> List[str]:
+        """Process a single frame and return tags"""
+        try:
+            with lms.Client() as client:
+                model = client.llm.model(self.model_name)
+                image_handle = client.files.prepare_image(frame_path)
+
+                chat = lms.Chat()
+                chat.add_user_message(self.tag_prompt, images=[image_handle])
+                prediction = model.respond(chat)
+
+                analysis = str(prediction)
+
+            try:
+                # Extract JSON from markdown code blocks if present
+                json_content = self._extract_json_from_response(analysis)
+                parsed_tags = json.loads(json_content)
+
+                # Flatten all tag categories into a single list
+                frame_tags = []
+                for category, tags in parsed_tags.items():
+                    if isinstance(tags, list):
+                        frame_tags.extend(tags)
+                return frame_tags
+
+            except json.JSONDecodeError as e:
+                self.logger.warning(
+                    f"Failed to parse JSON response for {frame_path}: {analysis}"
+                )
+                self.logger.debug(f"JSON decode error: {e}")
+
+        except Exception as e:
+            self.logger.error(f"Failed to analyze frame {frame_path}: {e}")
+        
+        return []
 
     def analyze_frames_sync(self, frame_paths: List[str]) -> List[str]:
         """Synchronous frame analysis for immediate processing"""
-        all_tags = []
-
-        for frame_path in frame_paths:
-            try:
-                with lms.Client() as client:
-                    model = client.llm.model(self.model_name)
-                    image_handle = client.files.prepare_image(frame_path)
-
-                    chat = lms.Chat()
-                    chat.add_user_message(self.tag_prompt, images=[image_handle])
-                    prediction = model.respond(chat)
-
-                    analysis = str(prediction)
-
-                try:
-                    # Extract JSON from markdown code blocks if present
-                    json_content = self._extract_json_from_response(analysis)
-                    parsed_tags = json.loads(json_content)
-
-                    # Flatten all tag categories into a single list
-                    frame_tags = []
-                    for category, tags in parsed_tags.items():
-                        if isinstance(tags, list):
-                            frame_tags.extend(tags)
-                    all_tags.extend(frame_tags)
-
-                except json.JSONDecodeError as e:
-                    self.logger.warning(
-                        f"Failed to parse JSON response for {frame_path}: {analysis}"
-                    )
-                    self.logger.debug(f"JSON decode error: {e}")
-
-            except Exception as e:
-                self.logger.error(f"Failed to analyze frame {frame_path}: {e}")
-
-        # Remove duplicates and return unique tags
-        return list(set(all_tags))
+        return self._process_frames_parallel(frame_paths, self._process_single_frame)
 
 
 class OllamaVisionProcessor(BaseVisionProcessor):
     """Handles Ollama Vision API interactions for video frame analysis"""
 
     def __init__(
-        self, model_name: str = "llava", base_url: str = "http://localhost:11434"
+        self, model_name: str = "llava", base_url: str = "http://localhost:11434", max_concurrent_requests: int = 1
     ):
-        super().__init__(model_name)
+        super().__init__(model_name, max_concurrent_requests)
         # self.base_url = base_url
         self.client = Client(host=base_url)
 
+    def _process_single_frame(self, frame_path: str) -> List[str]:
+        """Process a single frame and return tags"""
+        time.sleep(1)  # Rate limiting
+        try:
+            # Encode image as base64
+            image_data = self.encode_image(frame_path)
+            if not image_data:
+                return []
+
+            # Create chat request with image
+            response = self.client.chat(
+                model=self.model_name,
+                messages=[
+                    {
+                        "role": "user",
+                        "content": self.tag_prompt,
+                        "images": [image_data],
+                    }
+                ],
+                options={"num_ctx": 4096, "temperature": 0.1},
+            )
+
+            analysis = response["message"]["content"]
+
+            try:
+                # Extract JSON from markdown code blocks if present
+                json_content = self._extract_json_from_response(analysis)
+                parsed_tags = json.loads(json_content)
+
+                # Flatten all tag categories into a single list
+                frame_tags = []
+                for category, tags in parsed_tags.items():
+                    if isinstance(tags, list):
+                        frame_tags.extend(tags)
+                return frame_tags
+
+            except json.JSONDecodeError as e:
+                self.logger.warning(
+                    f"Failed to parse JSON response for {frame_path}: {analysis}"
+                )
+                self.logger.debug(f"JSON decode error: {e}")
+
+        except Exception as e:
+            self.logger.error(
+                f"Failed to analyze frame {frame_path} with Ollama: {e}"
+            )
+        
+        return []
+
     def analyze_frames_sync(self, frame_paths: List[str]) -> List[str]:
         """Synchronous frame analysis for immediate processing using Ollama"""
-        all_tags = []
-
-        for frame_path in frame_paths:
-            time.sleep(1)
-            try:
-                # Encode image as base64
-                image_data = self.encode_image(frame_path)
-                if not image_data:
-                    continue
-
-                # Create chat request with image
-                response = self.client.chat(
-                    model=self.model_name,
-                    messages=[
-                        {
-                            "role": "user",
-                            "content": self.tag_prompt,
-                            "images": [image_data],
-                        }
-                    ],
-                    options={"num_ctx": 4096, "temperature": 0.1},
-                )
-
-                analysis = response["message"]["content"]
-
-                try:
-                    # Extract JSON from markdown code blocks if present
-                    json_content = self._extract_json_from_response(analysis)
-                    parsed_tags = json.loads(json_content)
-
-                    # Flatten all tag categories into a single list
-                    frame_tags = []
-                    for category, tags in parsed_tags.items():
-                        if isinstance(tags, list):
-                            frame_tags.extend(tags)
-                    all_tags.extend(frame_tags)
-
-                except json.JSONDecodeError as e:
-                    self.logger.warning(
-                        f"Failed to parse JSON response for {frame_path}: {analysis}"
-                    )
-                    self.logger.debug(f"JSON decode error: {e}")
-
-            except Exception as e:
-                self.logger.error(
-                    f"Failed to analyze frame {frame_path} with Ollama: {e}"
-                )
-
-        # Remove duplicates and return unique tags
-        return list(set(all_tags))
+        return self._process_frames_parallel(frame_paths, self._process_single_frame)
 
 
 class APIVisionProcessor(BaseVisionProcessor):
     """Handles Z.AI API interactions for video frame analysis"""
 
     def __init__(
-        self, model_name: str = "glm-4.5v", base_url: str = "https://api.z.ai/api/paas/v4/chat/completions", auth_token: str = None
+        self, model_name: str = "glm-4.5v", base_url: str = "https://api.z.ai/api/paas/v4/chat/completions", auth_token: str = "", max_concurrent_requests: int = 3
     ):
-        super().__init__(model_name)
+        super().__init__(model_name, max_concurrent_requests)
         self.base_url = base_url
         self.auth_token = auth_token
         self.headers = {
@@ -497,90 +526,90 @@ class APIVisionProcessor(BaseVisionProcessor):
             "Content-Type": "application/json"
         }
 
+    def _process_single_frame(self, frame_path: str) -> List[str]:
+        """Process a single frame and return tags"""
+        try:
+            # Encode image as base64
+            image_data = self.encode_image(frame_path)
+            if not image_data:
+                return []
+
+            # Create API request payload
+            payload = {
+                "model": self.model_name,
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "image_url",
+                                "image_url": {
+                                    "url": f"data:image/jpeg;base64,{image_data}"
+                                }
+                            },
+                            {
+                                "type": "text",
+                                "text": self.tag_prompt
+                            }
+                        ]
+                    }
+                ],
+                "thinking": {
+                    "type": "enabled"
+                }
+            }
+
+            # Make API request
+            import requests
+            response = requests.post(self.base_url, headers=self.headers, json=payload)
+            
+            # Check for error response
+            if response.status_code != 200:
+                try:
+                    error_data = response.json()
+                    self.logger.error(
+                        f"API error for {frame_path}: Status {response.status_code}, "
+                        f"Response: {error_data}"
+                    )
+                except:
+                    self.logger.error(
+                        f"API error for {frame_path}: Status {response.status_code}, "
+                        f"Response: {response.text}"
+                    )
+                return []
+            
+            # Parse response
+            response_data = response.json()
+            analysis = response_data["choices"][0]["message"]["content"]
+
+            try:
+                # Extract JSON from markdown code blocks if present
+                json_content = self._extract_json_from_response(analysis)
+                parsed_tags = json.loads(json_content)
+
+                # Flatten all tag categories into a single list
+                frame_tags = []
+                for category, tags in parsed_tags.items():
+                    if isinstance(tags, list):
+                        frame_tags.extend(tags)
+                return frame_tags
+
+            except json.JSONDecodeError as e:
+                self.logger.warning(
+                    f"Failed to parse JSON response for {frame_path}: {analysis}"
+                )
+                self.logger.debug(f"JSON decode error: {e}")
+
+        except Exception as e:
+            self.logger.error(
+                f"Failed to analyze frame {frame_path} with Z.AI API: {e}"
+            )
+        
+        return []
+
     def analyze_frames_sync(self, frame_paths: List[str]) -> List[str]:
         """Synchronous frame analysis for immediate processing using Z.AI API"""
-        all_tags = []
-
-        for frame_path in frame_paths:
-            try:
-                # Encode image as base64
-                image_data = self.encode_image(frame_path)
-                if not image_data:
-                    continue
-
-                # Create API request payload
-                payload = {
-                    "model": self.model_name,
-                    "messages": [
-                        {
-                            "role": "user",
-                            "content": [
-                                {
-                                    "type": "image_url",
-                                    "image_url": {
-                                        "url": f"data:image/jpeg;base64,{image_data}"
-                                    }
-                                },
-                                {
-                                    "type": "text",
-                                    "text": self.tag_prompt
-                                }
-                            ]
-                        }
-                    ],
-                    "thinking": {
-                        "type": "enabled"
-                    }
-                }
-
-                # Make API request
-                import requests
-                response = requests.post(self.base_url, headers=self.headers, json=payload)
-                
-                # Check for error response
-                if response.status_code != 200:
-                    try:
-                        error_data = response.json()
-                        self.logger.error(
-                            f"API error for {frame_path}: Status {response.status_code}, "
-                            f"Response: {error_data}"
-                        )
-                    except:
-                        self.logger.error(
-                            f"API error for {frame_path}: Status {response.status_code}, "
-                            f"Response: {response.text}"
-                        )
-                    continue
-                
-                # Parse response
-                response_data = response.json()
-                analysis = response_data["choices"][0]["message"]["content"]
-
-                try:
-                    # Extract JSON from markdown code blocks if present
-                    json_content = self._extract_json_from_response(analysis)
-                    parsed_tags = json.loads(json_content)
-
-                    # Flatten all tag categories into a single list
-                    frame_tags = []
-                    for category, tags in parsed_tags.items():
-                        if isinstance(tags, list):
-                            frame_tags.extend(tags)
-                    all_tags.extend(frame_tags)
-
-                except json.JSONDecodeError as e:
-                    self.logger.warning(
-                        f"Failed to parse JSON response for {frame_path}: {analysis}"
-                    )
-                    self.logger.debug(f"JSON decode error: {e}")
-
-            except Exception as e:
-                self.logger.error(
-                    f"Failed to analyze frame {frame_path} with Z.AI API: {e}"
-                )
-
-        # Remove duplicates and return unique tags
-        return list(set(all_tags))
+        return self._process_frames_parallel(frame_paths, self._process_single_frame)
 
 
 class VisionProcessorFactory:
@@ -591,18 +620,21 @@ class VisionProcessorFactory:
         """Create a vision processor based on the provider type"""
         if provider.lower() == "lmstudio":
             model_name = config.get("model_name", "qwen2.5-vl-7b-instruct-abliterated")
-            return LMStudioVisionProcessor(model_name)
+            max_concurrent_requests = config.get("max_concurrent_requests", 2)
+            return LMStudioVisionProcessor(model_name, max_concurrent_requests)
         elif provider.lower() == "ollama":
             model_name = config.get("model_name", "llava")
             base_url = config.get("base_url", "http://localhost:11434")
-            return OllamaVisionProcessor(model_name, base_url)
+            max_concurrent_requests = config.get("max_concurrent_requests", 1)
+            return OllamaVisionProcessor(model_name, base_url, max_concurrent_requests)
         elif provider.lower() == "api":
             model_name = config.get("model_name", "glm-4.5v")
             base_url = config.get("base_url", "https://api.z.ai/api/paas/v4/chat/completions")
             auth_token = config.get("auth_token")
+            max_concurrent_requests = config.get("max_concurrent_requests", 3)
             if not auth_token:
                 raise ValueError("auth_token is required for API provider")
-            return APIVisionProcessor(model_name, base_url, auth_token)
+            return APIVisionProcessor(model_name, base_url, auth_token, max_concurrent_requests)
         else:
             raise ValueError(
                 f"Unsupported AI provider: {provider}. Supported providers: lmstudio, ollama, api"
@@ -1127,16 +1159,19 @@ def main():
         "lmstudio": {
             "model_name": os.getenv(
                 "LMSTUDIO_MODEL_NAME", "qwen2.5-vl-7b-instruct-abliterated"
-            )
+            ),
+            "max_concurrent_requests": int(os.getenv("LMSTUDIO_MAX_CONCURRENT", "2")),
         },
         "ollama": {
             "model_name": os.getenv("OLLAMA_MODEL_NAME", "llava"),
             "base_url": os.getenv("OLLAMA_BASE_URL", "http://localhost:11434"),
+            "max_concurrent_requests": int(os.getenv("OLLAMA_MAX_CONCURRENT", "1")),
         },
         "api": {
             "model_name": os.getenv("API_MODEL_NAME", "glm-4.5v"),
             "base_url": os.getenv("API_BASE_URL", "https://api.z.ai/api/paas/v4/chat/completions"),
             "auth_token": os.getenv("API_AUTH_TOKEN"),
+            "max_concurrent_requests": int(os.getenv("API_MAX_CONCURRENT", "3")),
         },
         "path_mappings": path_mappings,
         "days_back": int(os.getenv("DAYS_BACK", "5")),
