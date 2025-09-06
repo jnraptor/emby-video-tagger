@@ -30,11 +30,11 @@ MODEL_DIR = "/ollama_models"
 
 # Define the models we want to work with
 # You can specify different model versions using the format "model:tag"
-MODELS_TO_DOWNLOAD = ["qwen2.5vl:3b"]  # Downloaded at startup
-MODELS_TO_TEST = ["qwen2.5vl:3b"]  # Tested in our example
+MODELS_TO_DOWNLOAD = ["qwen2.5vl:7b"]  # Downloaded at startup
+MODELS_TO_TEST = ["qwen2.5vl:7b"]  # Tested in our example
 
 # Ollama version to install - you may need to update this for the latest models
-OLLAMA_VERSION = "0.11.9"
+OLLAMA_VERSION = "0.11.10"
 # Ollama's default port - we'll expose this through Modal
 OLLAMA_PORT = 11434
 
@@ -62,6 +62,10 @@ ollama_image = (
             # Configure Ollama to serve on its default port
             "OLLAMA_HOST": f"0.0.0.0:{OLLAMA_PORT}",
             "OLLAMA_MODELS": MODEL_DIR,  # Tell Ollama where to store models
+            "OLLAMA_MAX_LOADED_MODELS": "1",
+            "OLLAMA_NUM_PARALLEL": "3",
+            "OLLAMA_FLASH_ATTENTION": "1",
+            "OLLAMA_NEW_ENGINE": "true"
         }
     )
 )
@@ -92,6 +96,7 @@ model_volume = modal.Volume.from_name("ollama-models-store", create_if_missing=T
     timeout=60 * 5,  # 5 minutes max input runtime
     min_containers=1,  # Keep at least one container running for fast startup
 )
+@modal.concurrent(max_inputs=3)
 class OllamaServer:
     ollama_process: subprocess.Popen | None = None
 
@@ -285,7 +290,7 @@ async def local_main():
     """
     Tests the Ollama server with sample prompts and prints the results.
 
-    Run with: `modal run ollama.py`
+    Run with: `modal run ollama-modal.py`
     """
     print("Triggering test suite on the OllamaServer...")
     all_test_results = await OllamaServer().run_tests.remote.aio()
@@ -321,7 +326,7 @@ async def local_main():
 # this application persistently. You can do this with:
 #
 # ```bash
-# modal deploy ollama.py
+# modal deploy ollama-modal.py
 # ```
 #
 # This creates a persistent deployment that:
