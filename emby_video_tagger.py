@@ -38,7 +38,8 @@ from pathlib import Path
 from typing import List, Dict, Tuple, Optional
 from enum import Enum
 from datetime import datetime, timedelta
-from scenedetect import detect, ContentDetector
+from scenedetect import SceneManager, AdaptiveDetector, open_video
+#from scenedetect import detect, ContentDetector
 from apscheduler.schedulers.blocking import BlockingScheduler
 from apscheduler.jobstores.sqlalchemy import SQLAlchemyJobStore
 from apscheduler.executors.pool import ThreadPoolExecutor
@@ -190,7 +191,7 @@ class EmbyVideoTagger:
 class IntelligentFrameExtractor:
     """Extracts representative frames from videos using scene detection"""
 
-    def __init__(self, scene_threshold: float = 27.0):
+    def __init__(self, scene_threshold: float = 5.0): # default 27 for ContentDetector, 3 for AdaptiveDetector
         self.scene_threshold = scene_threshold
         self.logger = logging.getLogger(__name__)
 
@@ -205,9 +206,24 @@ class IntelligentFrameExtractor:
 
         try:
             # Detect scenes
-            scene_list = detect(
-                video_path, ContentDetector(threshold=self.scene_threshold)
-            )
+            #scene_list = detect(
+            #    video_path, ContentDetector(threshold=self.scene_threshold)
+            #)
+
+            # 1. Open video file (no context manager support in current PySceneDetect)
+            video = open_video(video_path)
+
+            # 2. Create a SceneManager and add the detector
+            scene_manager = SceneManager()
+            scene_manager.add_detector(AdaptiveDetector(adaptive_threshold=self.scene_threshold))
+
+            # 3. Perform scene detection using the open video backend
+            #    and downscale for a massive speed boost.
+            scene_manager.auto_downscale = True
+            scene_manager.detect_scenes(video=video, show_progress=False)
+
+            # 4. Get the list of scenes
+            scene_list = scene_manager.get_scene_list()
 
             if not scene_list:
                 self.logger.warning(
@@ -215,6 +231,7 @@ class IntelligentFrameExtractor:
                 )
                 return self._fallback_extraction(video_path, max_frames)
 
+            self.logger.info(f"Detected {len(scene_list)} scenes in {video_path}")  
             return self._extract_scene_frames(video_path, scene_list, max_frames)
 
         except Exception as e:
@@ -245,6 +262,7 @@ class IntelligentFrameExtractor:
             ]
         )
 
+        self.logger.info(f"Extracting frames from {len(scenes_to_process)} scenes")
         for i, scene in enumerate(scenes_to_process):
             try:
                 # Extract middle frame of each scene
@@ -271,6 +289,7 @@ class IntelligentFrameExtractor:
                 continue
 
         cap.release()
+        self.logger.info(f"Extracted {len(extracted_frames)} frames from {video_path}")
         return extracted_frames
 
     def _fallback_extraction(
