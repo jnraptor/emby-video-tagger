@@ -9,7 +9,7 @@
 #    volume using the `llama-download-modal.py` script.
 #
 # 2. Deploy this script:
-#    modal deploy llama-serve-modal.py   
+#    modal deploy llama-serve-modal.py
 #
 # 3. To stop the deployment, use:
 #    modal app stop llama-cpp-server
@@ -23,12 +23,13 @@ from pathlib import Path
 import subprocess
 
 # --- Variables ---
-REPO_ID = "bartowski/OpenGVLab_InternVL3_5-4B-GGUF"
-FILENAME = "OpenGVLab_InternVL3_5-4B-Q4_K_M.gguf"
-MPROJ_FILENAME = "mmproj-OpenGVLab_InternVL3_5-4B-bf16.gguf"
+#FILENAME = "OpenGVLab_InternVL3_5-4B-Q4_K_M.gguf"
+#MPROJ_FILENAME = "mmproj-OpenGVLab_InternVL3_5-4B-bf16.gguf"
+FILENAME = "Qwen2.5-VL-3B-Abliterated-Caption-it.Q8_0.gguf"
+MPROJ_FILENAME = "Qwen2.5-VL-3B-Abliterated-Caption-it.mmproj-Q8_0.gguf"
 ALIAS = "InternVL3_5-1B"
 N_GPU_LAYERS = "99"
-CTX_SIZE = "4096"
+CTX_SIZE = "12288" # 4096*3
 BATCH = "2048"
 UBATCH = "2048"
 PARALLEL = "3"

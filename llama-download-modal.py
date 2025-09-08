@@ -10,9 +10,9 @@ from pathlib import Path
 import subprocess
 
 # --- Variables ---
-REPO_ID = "bartowski/OpenGVLab_InternVL3_5-4B-GGUF"
-FILENAME = "OpenGVLab_InternVL3_5-4B-Q4_K_M.gguf"
-MPROJ_FILENAME = "mmproj-OpenGVLab_InternVL3_5-4B-bf16.gguf"
+REPO_ID = "mradermacher/Qwen2.5-VL-3B-Abliterated-Caption-it-GGUF"
+FILENAME = "Qwen2.5-VL-3B-Abliterated-Caption-it.Q8_0.gguf"
+MPROJ_FILENAME = "Qwen2.5-VL-3B-Abliterated-Caption-it.mmproj-Q8_0.gguf"
 
 # --- Configuration ---
 # Define the base Docker image from ghcr.io, a persistent volume for models,
