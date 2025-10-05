@@ -37,7 +37,7 @@ UBATCH = "2048"
 PARALLEL = "3"
 API_KEY = "ByU8dGHlt8chOIKT"
 #TAG = "12.9.1-devel-ubuntu22.04"
-TAG = "13.0.0-devel-ubuntu24.04"
+TAG = "13.0.1-devel-ubuntu24.04"
 GPU = "T4" # T4, L4, A10 Available GPUs: https://modal.com/pricing, https://modal.com/docs/guide/gpu#specifying-gpu-type
 
 # --- Configuration ---

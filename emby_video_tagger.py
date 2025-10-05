@@ -685,6 +685,7 @@ class VideoTaggingAutomation:
         self.process_favorites = config.get("process_favorites", False)
         self.favorites_only = config.get("favorites_only", False)
         self.copy_favorites_to = config.get("copy_favorites_to", "")
+        self.max_concurrent_videos = config.get("max_concurrent_videos", 2)
 
     def _setup_logging(self):
         """Configure logging for the application"""
@@ -780,37 +781,77 @@ class VideoTaggingAutomation:
         return emby_path
 
     def _process_video_list(self, videos_to_process: List[Tuple[Dict, str]]):
-        """Helper function to process a list of videos"""
+        """Helper function to process a list of videos with parallel processing"""
         self.logger.info(f"Total videos to process: {len(videos_to_process)}")
         successful_processes = 0
 
-        for video, source_type in videos_to_process:
-            self.logger.info(
-                f"Processing {source_type} video: {video.get('Name', 'Unknown')} with id {video['Id']}"
-            )
-            try:
-                if self._should_process_video(video):
-                    success = self._process_single_video(video, source_type)
-                    if success:
-                        successful_processes += 1
-
-                    # Add delay between videos to avoid overwhelming the system
-                    time.sleep(2)
-
-                # If the video is a favorite, attempt to copy it regardless of processed status
-                if source_type == "favorites":
-                    emby_video_path = video["Path"]
-                    video_path = self._remap_video_path(emby_video_path)
-                    video_name = video.get("Name", "Unknown")
-                    self._copy_favorite_video(video_path, video_name)
-
-            except Exception as e:
-                self.logger.error(
-                    f"Failed to process {source_type} video {video.get('Name', 'Unknown')}: {str(e)}"
+        if self.max_concurrent_videos <= 1 or len(videos_to_process) <= 1:
+            # Sequential processing for single worker or single video
+            for video, source_type in videos_to_process:
+                self.logger.info(
+                    f"Processing {source_type} video: {video.get('Name', 'Unknown')} with id {video['Id']}"
                 )
-                self._update_task_status(
-                    video["Id"], TaskStatus.FAILED, error=str(e), source_type=source_type
-                )
+                try:
+                    if self._should_process_video(video):
+                        success = self._process_single_video(video, source_type)
+                        if success:
+                            successful_processes += 1
+
+                        # Add delay between videos to avoid overwhelming the system
+                        time.sleep(2)
+
+                    # If the video is a favorite, attempt to copy it regardless of processed status
+                    if source_type == "favorites":
+                        emby_video_path = video["Path"]
+                        video_path = self._remap_video_path(emby_video_path)
+                        video_name = video.get("Name", "Unknown")
+                        self._copy_favorite_video(video_path, video_name)
+
+                except Exception as e:
+                    self.logger.error(
+                        f"Failed to process {source_type} video {video.get('Name', 'Unknown')}: {str(e)}"
+                    )
+                    self._update_task_status(
+                        video["Id"], TaskStatus.FAILED, error=str(e), source_type=source_type
+                    )
+        else:
+            # Parallel processing
+            with concurrent.futures.ThreadPoolExecutor(max_workers=self.max_concurrent_videos) as executor:
+                # Submit all tasks
+                future_to_video = {}
+                for video, source_type in videos_to_process:
+                    if self._should_process_video(video):
+                        future = executor.submit(self._process_single_video, video, source_type)
+                        future_to_video[future] = (video, source_type)
+                    else:
+                        # Still handle favorite copying for videos that shouldn't be processed
+                        if source_type == "favorites":
+                            emby_video_path = video["Path"]
+                            video_path = self._remap_video_path(emby_video_path)
+                            video_name = video.get("Name", "Unknown")
+                            self._copy_favorite_video(video_path, video_name)
+
+                # Collect results as they complete
+                for future in concurrent.futures.as_completed(future_to_video):
+                    video, source_type = future_to_video[future]
+                    try:
+                        success = future.result()
+                        if success:
+                            successful_processes += 1
+                            self.logger.info(
+                                f"Successfully processed {source_type} video: {video.get('Name', 'Unknown')}"
+                            )
+                        else:
+                            self.logger.warning(
+                                f"Failed to process {source_type} video: {video.get('Name', 'Unknown')}"
+                            )
+                    except Exception as e:
+                        self.logger.error(
+                            f"Exception processing {source_type} video {video.get('Name', 'Unknown')}: {str(e)}"
+                        )
+                        self._update_task_status(
+                            video["Id"], TaskStatus.FAILED, error=str(e), source_type=source_type
+                        )
 
         self.logger.info(
             f"Completed processing: {successful_processes}/{len(videos_to_process)} successful"
@@ -933,9 +974,8 @@ class VideoTaggingAutomation:
             sanitized = sanitized.replace(char, replacement)
         
         # Remove multiple consecutive dashes and clean up
-        sanitized = re.sub(r'-+', '-', sanitized)
-        sanitized = sanitized.strip('- ')
-        
+        sanitized = re.sub(r'-+', '-', sanitized).strip('- ')
+
         return sanitized
 
     def _copy_favorite_video(self, video_path: str, video_name: str) -> bool:
@@ -1197,6 +1237,7 @@ def main():
         "process_favorites": os.getenv("PROCESS_FAVORITES", "false").lower() == "true",
         "favorites_only": os.getenv("FAVORITES_ONLY", "false").lower() == "true",
         "copy_favorites_to": os.getenv("COPY_FAVORITES_TO", "").strip(),
+        "max_concurrent_videos": int(os.getenv("MAX_CONCURRENT_VIDEOS", "2")),  # Added
     }
 
     # Validate configuration
