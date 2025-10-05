@@ -25,8 +25,10 @@ import subprocess
 # --- Variables ---
 #FILENAME = "OpenGVLab_InternVL3_5-4B-Q4_K_M.gguf"
 #MPROJ_FILENAME = "mmproj-OpenGVLab_InternVL3_5-4B-bf16.gguf"
-FILENAME = "Qwen2.5-VL-3B-Abliterated-Caption-it.Q8_0.gguf"
-MPROJ_FILENAME = "Qwen2.5-VL-3B-Abliterated-Caption-it.mmproj-Q8_0.gguf"
+#FILENAME = "Qwen2.5-VL-3B-Abliterated-Caption-it.Q8_0.gguf"
+#MPROJ_FILENAME = "Qwen2.5-VL-3B-Abliterated-Caption-it.mmproj-Q8_0.gguf"
+FILENAME = "Qwen2.5-VL-7B-NSFW-Caption-V4.Q8_0.gguf"
+MPROJ_FILENAME = "Qwen2.5-VL-7B-NSFW-Caption-V4.mmproj-Q8_0.gguf"
 ALIAS = "InternVL3_5-1B"
 N_GPU_LAYERS = "99"
 CTX_SIZE = "12288" # 4096*3

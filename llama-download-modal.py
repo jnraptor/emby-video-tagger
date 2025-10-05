@@ -10,9 +10,12 @@ from pathlib import Path
 import subprocess
 
 # --- Variables ---
-REPO_ID = "mradermacher/Qwen2.5-VL-3B-Abliterated-Caption-it-GGUF"
-FILENAME = "Qwen2.5-VL-3B-Abliterated-Caption-it.Q8_0.gguf"
-MPROJ_FILENAME = "Qwen2.5-VL-3B-Abliterated-Caption-it.mmproj-Q8_0.gguf"
+#REPO_ID = "mradermacher/Qwen2.5-VL-3B-Abliterated-Caption-it-GGUF"
+#FILENAME = "Qwen2.5-VL-3B-Abliterated-Caption-it.Q8_0.gguf"
+#MPROJ_FILENAME = "Qwen2.5-VL-3B-Abliterated-Caption-it.mmproj-Q8_0.gguf"
+REPO_ID = "mradermacher/Qwen2.5-VL-7B-NSFW-Caption-V4-GGUF"
+FILENAME = "Qwen2.5-VL-7B-NSFW-Caption-V4.Q8_0.gguf"
+MPROJ_FILENAME = "Qwen2.5-VL-7B-NSFW-Caption-V4.mmproj-Q8_0.gguf"
 
 # --- Configuration ---
 # Define the base Docker image from ghcr.io, a persistent volume for models,
