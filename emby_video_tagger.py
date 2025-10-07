@@ -1331,7 +1331,16 @@ def main():
             print(f"Videos processed in last 7 days: {stats.get('last_7_days', 0)}")
             print(f"Total tags generated: {stats.get('total_tags', 0)}")
         elif command == "extract":
-            automation.run_extraction_pass()
+            # Check for --include-favorites flag
+            include_favorites = "--include-favorites" in sys.argv
+            if include_favorites:
+                # Temporarily override config for this run
+                original_process_favorites = automation.process_favorites
+                automation.process_favorites = True
+                automation.run_extraction_pass()
+                automation.process_favorites = original_process_favorites
+            else:
+                automation.run_extraction_pass()
         elif command == "analyze":
             automation.run_analysis_pass()
         elif command == "manual" and len(sys.argv) > 2:
@@ -1348,6 +1357,7 @@ def main():
             print("  python emby_video_tagger.py once --include-favorites  # Run once including favorites")
             print("  python emby_video_tagger.py favorites          # Process only favorite videos")
             print("  python emby_video_tagger.py extract            # Run frame extraction pass")
+            print("  python emby_video_tagger.py extract --include-favorites # Run extraction pass including favorites")
             print("  python emby_video_tagger.py analyze            # Run frame analysis pass")
             print("  python emby_video_tagger.py stats              # Show processing statistics")
             print("  python emby_video_tagger.py manual <video_id>  # Process specific video")
