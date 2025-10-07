@@ -54,7 +54,8 @@ import concurrent.futures
 
 
 class TaskStatus(Enum):
-    PENDING = "pending"
+    PENDING_EXTRACTION = "pending_extraction"
+    PENDING_ANALYSIS = "pending_analysis"
     PROCESSING = "processing"
     COMPLETED = "completed"
     FAILED = "failed"
@@ -196,29 +197,26 @@ class IntelligentFrameExtractor:
         self.logger = logging.getLogger(__name__)
 
     def extract_representative_frames(
-        self, video_path: str, max_frames: int = 10
+        self, video_path: str, output_dir: str, max_frames: int = 10
     ) -> List[Tuple[str, int]]:
-        """Extract key frames using scene detection"""
+        """Extract key frames using scene detection and save to a directory"""
 
         if not Path(video_path).exists():
             self.logger.error(f"Video file not found: {video_path}")
             return []
 
-        try:
-            # Detect scenes
-            #scene_list = detect(
-            #    video_path, ContentDetector(threshold=self.scene_threshold)
-            #)
+        output_path = Path(output_dir)
+        output_path.mkdir(parents=True, exist_ok=True)
 
-            # 1. Open video file (no context manager support in current PySceneDetect)
+        try:
+            # 1. Open video file
             video = open_video(video_path)
 
             # 2. Create a SceneManager and add the detector
             scene_manager = SceneManager()
             scene_manager.add_detector(AdaptiveDetector(adaptive_threshold=self.scene_threshold))
 
-            # 3. Perform scene detection using the open video backend
-            #    and downscale for a massive speed boost.
+            # 3. Perform scene detection with downscaling for speed
             scene_manager.auto_downscale = True
             scene_manager.detect_scenes(video=video, show_progress=False)
 
@@ -229,17 +227,17 @@ class IntelligentFrameExtractor:
                 self.logger.warning(
                     f"No scenes detected in {video_path}, using fallback"
                 )
-                return self._fallback_extraction(video_path, max_frames)
+                return self._fallback_extraction(video_path, output_path, max_frames)
 
-            self.logger.info(f"Detected {len(scene_list)} scenes in {video_path}")  
-            return self._extract_scene_frames(video_path, scene_list, max_frames)
+            self.logger.info(f"Detected {len(scene_list)} scenes in {video_path}")
+            return self._extract_scene_frames(video_path, scene_list, output_path, max_frames)
 
         except Exception as e:
             self.logger.error(f"Scene detection failed for {video_path}: {e}")
-            return self._fallback_extraction(video_path, max_frames)
+            return self._fallback_extraction(video_path, output_path, max_frames)
 
     def _extract_scene_frames(
-        self, video_path: str, scene_list: List, max_frames: int
+        self, video_path: str, scene_list: List, output_dir: Path, max_frames: int
     ) -> List[Tuple[str, int]]:
         """Extract frames from detected scenes"""
         cap = cv2.VideoCapture(video_path)
@@ -250,7 +248,6 @@ class IntelligentFrameExtractor:
         fps = cap.get(cv2.CAP_PROP_FPS) or 25.0  # Default to 25 FPS if unavailable
 
         extracted_frames = []
-        output_dir = Path(tempfile.mkdtemp(prefix="frames_"))
 
         # Sample scenes evenly if too many detected
         scenes_to_process = (
@@ -293,7 +290,7 @@ class IntelligentFrameExtractor:
         return extracted_frames
 
     def _fallback_extraction(
-        self, video_path: str, max_frames: int
+        self, video_path: str, output_dir: Path, max_frames: int
     ) -> List[Tuple[str, int]]:
         """Fallback to uniform sampling if scene detection fails"""
         cap = cv2.VideoCapture(video_path)
@@ -306,9 +303,7 @@ class IntelligentFrameExtractor:
             return []
 
         frame_step = max(1, total_frames // max_frames)
-
         extracted_frames = []
-        output_dir = Path(tempfile.mkdtemp(prefix="frames_"))
 
         for i in range(0, total_frames, frame_step):
             if len(extracted_frames) >= max_frames:
@@ -686,6 +681,7 @@ class VideoTaggingAutomation:
         self.favorites_only = config.get("favorites_only", False)
         self.copy_favorites_to = config.get("copy_favorites_to", "")
         self.max_concurrent_videos = config.get("max_concurrent_videos", 2)
+        self.frame_cache_path = config.get("frame_cache_path", "/tmp/frame_cache")
 
     def _setup_logging(self):
         """Configure logging for the application"""
@@ -780,179 +776,117 @@ class VideoTaggingAutomation:
         self.logger.warning(f"No path mapping found for: {emby_path}")
         return emby_path
 
-    def _process_video_list(self, videos_to_process: List[Tuple[Dict, str]]):
-        """Helper function to process a list of videos with parallel processing"""
-        self.logger.info(f"Total videos to process: {len(videos_to_process)}")
-        successful_processes = 0
-
-        if self.max_concurrent_videos <= 1 or len(videos_to_process) <= 1:
-            # Sequential processing for single worker or single video
-            for video, source_type in videos_to_process:
-                self.logger.info(
-                    f"Processing {source_type} video: {video.get('Name', 'Unknown')} with id {video['Id']}"
-                )
-                try:
-                    if self._should_process_video(video):
-                        success = self._process_single_video(video, source_type)
-                        if success:
-                            successful_processes += 1
-
-                        # Add delay between videos to avoid overwhelming the system
-                        time.sleep(2)
-
-                    # If the video is a favorite, attempt to copy it regardless of processed status
-                    if source_type == "favorites":
-                        emby_video_path = video["Path"]
-                        video_path = self._remap_video_path(emby_video_path)
-                        video_name = video.get("Name", "Unknown")
-                        self._copy_favorite_video(video_path, video_name)
-
-                except Exception as e:
-                    self.logger.error(
-                        f"Failed to process {source_type} video {video.get('Name', 'Unknown')}: {str(e)}"
-                    )
-                    self._update_task_status(
-                        video["Id"], TaskStatus.FAILED, error=str(e), source_type=source_type
-                    )
-        else:
-            # Parallel processing
-            with concurrent.futures.ThreadPoolExecutor(max_workers=self.max_concurrent_videos) as executor:
-                # Submit all tasks
-                future_to_video = {}
-                for video, source_type in videos_to_process:
-                    if self._should_process_video(video):
-                        future = executor.submit(self._process_single_video, video, source_type)
-                        future_to_video[future] = (video, source_type)
-                    else:
-                        # Still handle favorite copying for videos that shouldn't be processed
-                        if source_type == "favorites":
-                            emby_video_path = video["Path"]
-                            video_path = self._remap_video_path(emby_video_path)
-                            video_name = video.get("Name", "Unknown")
-                            self._copy_favorite_video(video_path, video_name)
-
-                # Collect results as they complete
-                for future in concurrent.futures.as_completed(future_to_video):
-                    video, source_type = future_to_video[future]
-                    try:
-                        success = future.result()
-                        if success:
-                            successful_processes += 1
-                            self.logger.info(
-                                f"Successfully processed {source_type} video: {video.get('Name', 'Unknown')}"
-                            )
-                        else:
-                            self.logger.warning(
-                                f"Failed to process {source_type} video: {video.get('Name', 'Unknown')}"
-                            )
-                    except Exception as e:
-                        self.logger.error(
-                            f"Exception processing {source_type} video {video.get('Name', 'Unknown')}: {str(e)}"
-                        )
-                        self._update_task_status(
-                            video["Id"], TaskStatus.FAILED, error=str(e), source_type=source_type
-                        )
-
-        self.logger.info(
-            f"Completed processing: {successful_processes}/{len(videos_to_process)} successful"
-        )
-
-    def process_daily_videos(self, days_back: int = 5):
-        """Main automation function - processes recent videos and optionally favorites"""
-        self.logger.info("Starting daily video processing")
-
-        try:
-            videos_to_process = []
-            
-            # Get videos based on configuration
-            if self.favorites_only:
-                self.logger.info("Processing favorites only")
-                favorite_videos = self.emby_client.get_favorite_videos()
-                videos_to_process.extend([(video, "favorites") for video in favorite_videos])
-            else:
-                # Get recently added videos
-                recent_videos = self.emby_client.get_recent_videos(days_back=days_back)
-                self.logger.info(f"Found {len(recent_videos)} recent videos")
-                videos_to_process.extend([(video, "recent") for video in recent_videos])
-                
-                # Optionally include favorites
-                if self.process_favorites:
-                    self.logger.info("Including favorites in processing")
-                    favorite_videos = self.emby_client.get_favorite_videos()
-                    videos_to_process.extend([(video, "favorites") for video in favorite_videos])
-
-            self._process_video_list(videos_to_process)
-
-        except Exception as e:
-            self.logger.error(f"Daily processing failed: {str(e)}")
-
-    def _process_single_video(self, video: Dict, source_type: str = "recent") -> bool:
-        """Process individual video with comprehensive error handling"""
+    def _extract_frames_for_video(self, video: Dict, source_type: str) -> bool:
+        """Extracts frames for a single video and saves them to the cache."""
         video_id = video["Id"]
         emby_video_path = video["Path"]
         video_path = self._remap_video_path(emby_video_path)
         video_name = video.get("Name", "Unknown")
 
-        self.logger.info(f"Processing {source_type} video: {video_name}")
-        self.logger.info(f"Original path: {emby_video_path}")
-        self.logger.info(f"Remapped path: {video_path}")
-        self._update_task_status(video_id, TaskStatus.PROCESSING, file_path=video_path, source_type=source_type)
-
-        temp_dirs = []
+        self.logger.info(f"Starting frame extraction for {source_type} video: {video_name}")
+        self._update_task_status(video_id, TaskStatus.PENDING_EXTRACTION, file_path=video_path, source_type=source_type)
 
         try:
-            # Extract frames
+            frame_output_dir = Path(self.frame_cache_path) / video_id
+            frame_output_dir.mkdir(parents=True, exist_ok=True)
+
+            for item in frame_output_dir.iterdir():
+                if item.is_file():
+                    item.unlink()
+
             frame_paths = self.frame_extractor.extract_representative_frames(
-                video_path, max_frames=5
+                video_path, str(frame_output_dir), max_frames=5
             )
+
             if not frame_paths:
-                raise ValueError("No frames extracted from video")
+                raise ValueError("No frames were extracted from the video.")
 
-            # Track temp directories for cleanup
-            temp_dirs.extend([Path(fp[0]).parent for fp in frame_paths])
-
-            # Analyze frames using LMStudio
-            tags = self.vision_processor.analyze_frames_sync(
-                [fp[0] for fp in frame_paths]
-            )
-
-            if tags:
-                # Get existing tags and merge with new ones
-                # existing_tags = video.get("Tags", [])
-                existing_tags = [x["Name"] for x in video.get("TagItems", [])]
-                all_tags = list(
-                    set(existing_tags + tags + ["ai-generated"])
-                )  # Add marker tag
-
-                # Update Emby with new tags
-                success = self.emby_client.update_video_tags(video_id, all_tags)
-                if success:
-                    self.logger.info(f"Updated {video_name} with {len(tags)} new tags")
-                    self._update_task_status(
-                        video_id, TaskStatus.COMPLETED, tag_count=len(tags)
-                    )
-                else:
-                    raise ValueError("Failed to update tags in Emby")
-            else:
-                raise ValueError("No tags generated from analysis")
-
+            self.logger.info(f"Successfully extracted {len(frame_paths)} frames for {video_name}")
+            self._update_task_status(video_id, TaskStatus.PENDING_ANALYSIS)
             return True
 
         except Exception as e:
-            self.logger.error(f"Processing failed for {video_name}: {str(e)}")
+            self.logger.error(f"Frame extraction failed for {video_name}: {str(e)}")
             self._update_task_status(video_id, TaskStatus.FAILED, error=str(e))
             return False
 
-        finally:
-            # Clean up temporary files
-            for temp_dir in temp_dirs:
+    def _analyze_frames_for_video(self, task: Dict) -> bool:
+        """Analyzes cached frames for a single video and updates Emby."""
+        video_id = task['emby_id']
+        video_path = task['file_path']
+        video_name = Path(video_path).name
+
+        self.logger.info(f"Starting frame analysis for video: {video_name} (ID: {video_id})")
+        self._update_task_status(video_id, TaskStatus.PROCESSING)
+
+        try:
+            frame_cache_dir = Path(self.frame_cache_path) / video_id
+            if not frame_cache_dir.exists():
+                raise FileNotFoundError(f"Frame cache directory not found for video {video_id}")
+
+            frame_paths = [str(p) for p in frame_cache_dir.glob("*.jpg")]
+            if not frame_paths:
+                raise ValueError(f"No cached frames found for video {video_id}")
+
+            self.logger.info(f"Found {len(frame_paths)} cached frames for analysis.")
+
+            tags = self.vision_processor.analyze_frames_sync(frame_paths)
+
+            if not tags:
+                raise ValueError("No tags were generated from frame analysis.")
+
+            url = f"{self.emby_client.base_url}/emby/Items?Ids={video_id}&Fields=Tags,TagItems"
+            response = self.emby_client.session.get(url)
+            response.raise_for_status()
+            video_details = response.json()["Items"][0]
+
+            existing_tags = [x["Name"] for x in video_details.get("TagItems", [])]
+            all_tags = list(set(existing_tags + tags + ["ai-generated"]))
+
+            success = self.emby_client.update_video_tags(video_id, all_tags)
+            if success:
+                self.logger.info(f"Successfully updated {video_name} with {len(tags)} new tags.")
+                self._update_task_status(video_id, TaskStatus.COMPLETED, tag_count=len(tags))
+
                 try:
-                    if temp_dir.exists():
-                        shutil.rmtree(temp_dir)
+                    shutil.rmtree(frame_cache_dir)
+                    self.logger.info(f"Cleaned up frame cache for video {video_id}")
                 except Exception as e:
-                    self.logger.warning(
-                        f"Failed to clean up temp directory {temp_dir}: {e}"
-                    )
+                    self.logger.warning(f"Failed to clean up frame cache for video {video_id}: {e}")
+
+                return True
+            else:
+                raise ValueError("Failed to update tags in Emby.")
+
+        except Exception as e:
+            self.logger.error(f"Frame analysis failed for {video_name}: {str(e)}")
+            self._update_task_status(video_id, TaskStatus.FAILED, error=str(e))
+            return False
+
+    def _get_pending_analysis_tasks(self) -> List[Dict]:
+        """Retrieves tasks from the database that are pending analysis."""
+        conn = sqlite3.connect(self.task_tracker)
+        conn.row_factory = sqlite3.Row
+        try:
+            cursor = conn.execute(
+                "SELECT emby_id, file_path, source_type FROM video_tasks WHERE status = ?",
+                (TaskStatus.PENDING_ANALYSIS.value,)
+            )
+            tasks = [dict(row) for row in cursor.fetchall()]
+            self.logger.info(f"Found {len(tasks)} videos pending analysis.")
+            return tasks
+        except Exception as e:
+            self.logger.error(f"Failed to query for pending analysis tasks: {e}")
+            return []
+        finally:
+            conn.close()
+
+    def process_daily_videos(self, days_back: int = 5):
+        """Main automation function - processes recent videos and optionally favorites"""
+        self.logger.info("Starting daily video processing")
+        self.days_back = days_back
+        self.run_extraction_pass()
+        self.run_analysis_pass()
 
     def _sanitize_filename(self, filename: str) -> str:
         """Sanitize filename by replacing special characters that may cause issues"""
@@ -1071,9 +1005,14 @@ class VideoTaggingAutomation:
         conn = sqlite3.connect(self.task_tracker)
 
         try:
-            if status == TaskStatus.PROCESSING and file_path:
+            if status == TaskStatus.PENDING_EXTRACTION:
+                if not file_path:
+                    self.logger.error(f"File path is required for PENDING_EXTRACTION status for video {video_id}")
+                    return
+                # This is the entry point for a new task, resets all fields.
                 conn.execute(
-                    "INSERT OR REPLACE INTO video_tasks (emby_id, file_path, status, source_type) VALUES (?, ?, ?, ?)",
+                    "INSERT OR REPLACE INTO video_tasks (emby_id, file_path, status, source_type, created_at, completed_at, tag_count, error_message) "
+                    "VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP, NULL, 0, NULL)",
                     (video_id, file_path, status.value, source_type),
                 )
             elif status == TaskStatus.COMPLETED:
@@ -1086,11 +1025,13 @@ class VideoTaggingAutomation:
                     "UPDATE video_tasks SET status = ?, error_message = ? WHERE emby_id = ?",
                     (status.value, error, video_id),
                 )
-            else:
+            elif status in [TaskStatus.PENDING_ANALYSIS, TaskStatus.PROCESSING]:
                 conn.execute(
-                    "INSERT OR REPLACE INTO video_tasks (emby_id, status, source_type) VALUES (?, ?, ?)",
-                    (video_id, status.value, source_type),
+                    "UPDATE video_tasks SET status = ? WHERE emby_id = ?",
+                    (status.value, video_id),
                 )
+            else:
+                self.logger.warning(f"Unhandled status update for video {video_id}: {status}")
 
             conn.commit()
 
@@ -1099,35 +1040,69 @@ class VideoTaggingAutomation:
         finally:
             conn.close()
 
+    def _get_video_details(self, video_id: str) -> Optional[Dict]:
+        """Fetches detailed metadata for a single video from Emby."""
+        try:
+            url = f"{self.emby_client.base_url}/emby/Items?Ids={video_id}&Fields=Path,Tags,TagItems"
+            response = self.emby_client.session.get(url)
+            response.raise_for_status()
+            items = response.json().get("Items", [])
+            if items:
+                return items[0]
+            self.logger.warning(f"Video with ID {video_id} not found.")
+            return None
+        except Exception as e:
+            self.logger.error(f"Failed to fetch details for video {video_id}: {e}")
+            return None
+
     def process_favorite_videos(self):
         """Process only favorite videos"""
         self.logger.info("Starting favorite videos processing")
 
+        # Temporarily set favorites_only to true for this run
+        original_favorites_only = self.favorites_only
+        self.favorites_only = True
+
         try:
-            favorite_videos = self.emby_client.get_favorite_videos()
-            self.logger.info(f"Found {len(favorite_videos)} favorite videos")
-
-            videos_to_process = [(video, "favorites") for video in favorite_videos]
-            self._process_video_list(videos_to_process)
-
-        except Exception as e:
-            self.logger.error(f"Favorite processing failed: {str(e)}")
+            self.run_extraction_pass()
+            self.run_analysis_pass()
+        finally:
+            # Restore original setting
+            self.favorites_only = original_favorites_only
 
     def process_single_video_manual(self, video_id: str) -> bool:
-        """Manually process a single video by ID"""
-        try:
-            # Get video details from Emby
-            url = f"{self.emby_client.base_url}/emby/Items?Ids={video_id}&Fields=Path,Tags"
-            response = self.emby_client.session.get(url)
-            response.raise_for_status()
-            video = response.json()
-            self.logger.info(video["Items"][0])
+        """Manually process a single video by ID, running both passes."""
+        self.logger.info(f"Starting manual processing for video ID: {video_id}")
 
-            return self._process_single_video(video["Items"][0])
-
-        except Exception as e:
-            self.logger.error(f"Failed to manually process video {video_id}: {e}")
+        video_details = self._get_video_details(video_id)
+        if not video_details:
             return False
+
+        # --- Extraction Pass ---
+        self.logger.info("Running manual extraction...")
+        extract_success = self._extract_frames_for_video(video_details, "manual")
+        if not extract_success:
+            self.logger.error("Manual extraction failed, aborting analysis.")
+            return False
+
+        # --- Analysis Pass ---
+        self.logger.info("Running manual analysis...")
+
+        # Create a task dictionary that mimics what would be in the database
+        task = {
+            'emby_id': video_id,
+            'file_path': self._remap_video_path(video_details["Path"]),
+            'source_type': 'manual'
+        }
+
+        analysis_success = self._analyze_frames_for_video(task)
+
+        if analysis_success:
+            self.logger.info(f"Manual processing completed successfully for video ID: {video_id}")
+        else:
+            self.logger.error(f"Manual analysis failed for video ID: {video_id}")
+
+        return analysis_success
 
     def get_processing_stats(self) -> Dict:
         """Get statistics about processing tasks"""
@@ -1172,10 +1147,82 @@ class VideoTaggingAutomation:
         finally:
             conn.close()
 
+    def run_extraction_pass(self):
+        """Runs the frame extraction pass."""
+        self.logger.info("Starting frame extraction pass.")
+
+        all_videos = []
+        if self.favorites_only:
+            self.logger.info("Processing favorites only for extraction.")
+            favorite_videos = self.emby_client.get_favorite_videos()
+            all_videos.extend([(video, "favorites") for video in favorite_videos])
+        else:
+            recent_videos = self.emby_client.get_recent_videos(days_back=self.days_back)
+            self.logger.info(f"Found {len(recent_videos)} recent videos for extraction.")
+            all_videos.extend([(video, "recent") for video in recent_videos])
+
+            if self.process_favorites:
+                self.logger.info("Including favorites in extraction.")
+                favorite_videos = self.emby_client.get_favorite_videos()
+                all_videos.extend([(video, "favorites") for video in favorite_videos])
+
+        # Handle favorite copying
+        for video, source_type in all_videos:
+            if source_type == "favorites":
+                emby_video_path = video["Path"]
+                video_path = self._remap_video_path(emby_video_path)
+                video_name = video.get("Name", "Unknown")
+                self._copy_favorite_video(video_path, video_name)
+
+        videos_to_process = [
+            (video, source_type)
+            for video, source_type in all_videos
+            if self._should_process_video(video)
+        ]
+
+        self.logger.info(f"Found {len(videos_to_process)} videos needing frame extraction.")
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=self.max_concurrent_videos) as executor:
+            future_to_video = {
+                executor.submit(self._extract_frames_for_video, video, source_type): video
+                for video, source_type in videos_to_process
+            }
+            for future in concurrent.futures.as_completed(future_to_video):
+                video = future_to_video[future]
+                try:
+                    future.result()
+                except Exception as e:
+                    self.logger.error(f"Extraction failed for video {video.get('Name', 'Unknown')}: {e}")
+
+    def run_analysis_pass(self):
+        """Runs the frame analysis pass."""
+        self.logger.info("Starting frame analysis pass.")
+
+        tasks_to_process = self._get_pending_analysis_tasks()
+
+        if not tasks_to_process:
+            self.logger.info("No videos are currently pending analysis.")
+            return
+
+        self.logger.info(f"Found {len(tasks_to_process)} videos to analyze.")
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=self.max_concurrent_videos) as executor:
+            future_to_task = {
+                executor.submit(self._analyze_frames_for_video, task): task
+                for task in tasks_to_process
+            }
+            for future in concurrent.futures.as_completed(future_to_task):
+                task = future_to_task[future]
+                try:
+                    future.result()
+                except Exception as e:
+                    self.logger.error(f"Analysis failed for video ID {task['emby_id']}: {e}")
+
     def run_once(self):
         """Run processing once without scheduling"""
         self.logger.info("Running video tagging once")
-        self.process_daily_videos(self.days_back)
+        self.run_extraction_pass()
+        self.run_analysis_pass()
 
     def run_scheduler(self):
         """Start the automation scheduler"""
@@ -1238,6 +1285,7 @@ def main():
         "favorites_only": os.getenv("FAVORITES_ONLY", "false").lower() == "true",
         "copy_favorites_to": os.getenv("COPY_FAVORITES_TO", "").strip(),
         "max_concurrent_videos": int(os.getenv("MAX_CONCURRENT_VIDEOS", "2")),  # Added
+        "frame_cache_path": os.getenv("FRAME_CACHE_PATH", "/tmp/frame_cache"),
     }
 
     # Validate configuration
@@ -1282,6 +1330,10 @@ def main():
             print(f"Source counts: {stats.get('by_source', {})}")
             print(f"Videos processed in last 7 days: {stats.get('last_7_days', 0)}")
             print(f"Total tags generated: {stats.get('total_tags', 0)}")
+        elif command == "extract":
+            automation.run_extraction_pass()
+        elif command == "analyze":
+            automation.run_analysis_pass()
         elif command == "manual" and len(sys.argv) > 2:
             # Manually process a specific video ID
             video_id = sys.argv[2]
@@ -1295,6 +1347,8 @@ def main():
             print("  python emby_video_tagger.py once               # Run once without scheduling")
             print("  python emby_video_tagger.py once --include-favorites  # Run once including favorites")
             print("  python emby_video_tagger.py favorites          # Process only favorite videos")
+            print("  python emby_video_tagger.py extract            # Run frame extraction pass")
+            print("  python emby_video_tagger.py analyze            # Run frame analysis pass")
             print("  python emby_video_tagger.py stats              # Show processing statistics")
             print("  python emby_video_tagger.py manual <video_id>  # Process specific video")
     else:
