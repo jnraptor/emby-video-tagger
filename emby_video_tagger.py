@@ -113,7 +113,7 @@ class EmbyVideoTagger:
             "Recursive": "true",
             "IncludeItemTypes": "Video",
             "Fields": "Tags,TagItems,Genres,ProviderIds,Path,DateCreated",
-            "Limit": 200,
+            "Limit": 1000,
         }
 
         try:
