@@ -23,12 +23,10 @@ from pathlib import Path
 import subprocess
 
 # --- Variables ---
-#FILENAME = "OpenGVLab_InternVL3_5-4B-Q4_K_M.gguf"
-#MPROJ_FILENAME = "mmproj-OpenGVLab_InternVL3_5-4B-bf16.gguf"
-#FILENAME = "Qwen2.5-VL-3B-Abliterated-Caption-it.Q8_0.gguf"
-#MPROJ_FILENAME = "Qwen2.5-VL-3B-Abliterated-Caption-it.mmproj-Q8_0.gguf"
-FILENAME = "Qwen2.5-VL-7B-NSFW-Caption-V4.Q8_0.gguf"
-MPROJ_FILENAME = "Qwen2.5-VL-7B-NSFW-Caption-V4.mmproj-Q8_0.gguf"
+#FILENAME = "Qwen2.5-VL-7B-NSFW-Caption-V4.Q8_0.gguf"
+#MPROJ_FILENAME = "Qwen2.5-VL-7B-NSFW-Caption-V4.mmproj-Q8_0.gguf"
+FILENAME = "Qwen3-VL-8B-NSFW-Caption-V4.Q8_0.gguf"
+MPROJ_FILENAME = "Qwen3-VL-8B-NSFW-Caption-V4.mmproj-Q8_0.gguf"
 ALIAS = "InternVL3_5-1B"
 N_GPU_LAYERS = "99"
 CTX_SIZE = "12288" # 4096*3
@@ -49,7 +47,7 @@ llama_image = (
     #modal.Image.from_registry("ghcr.io/ggml-org/llama.cpp:server-cuda", add_python="3.11")
     modal.Image.from_registry(f"nvidia/cuda:{TAG}", add_python="3.12")
     .apt_install("git", "build-essential", "cmake", "curl", "libcurl4-openssl-dev", "ccache")
-    .run_commands("git clone --depth 1 https://github.com/ggml-org/llama.cpp", force_build=False)
+    .run_commands("git clone --depth 1 --branch b6951 https://github.com/ggml-org/llama.cpp", force_build=False)
     .run_commands(
         "nvidia-smi",
         gpu=GPU

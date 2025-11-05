@@ -10,12 +10,12 @@ from pathlib import Path
 import subprocess
 
 # --- Variables ---
-#REPO_ID = "mradermacher/Qwen2.5-VL-3B-Abliterated-Caption-it-GGUF"
-#FILENAME = "Qwen2.5-VL-3B-Abliterated-Caption-it.Q8_0.gguf"
-#MPROJ_FILENAME = "Qwen2.5-VL-3B-Abliterated-Caption-it.mmproj-Q8_0.gguf"
-REPO_ID = "mradermacher/Qwen2.5-VL-7B-NSFW-Caption-V4-GGUF"
-FILENAME = "Qwen2.5-VL-7B-NSFW-Caption-V4.Q8_0.gguf"
-MPROJ_FILENAME = "Qwen2.5-VL-7B-NSFW-Caption-V4.mmproj-Q8_0.gguf"
+#REPO_ID = "mradermacher/Qwen2.5-VL-7B-NSFW-Caption-V4-GGUF"
+#FILENAME = "Qwen2.5-VL-7B-NSFW-Caption-V4.Q8_0.gguf"
+#MPROJ_FILENAME = "Qwen2.5-VL-7B-NSFW-Caption-V4.mmproj-Q8_0.gguf"
+REPO_ID = "mradermacher/Qwen3-VL-8B-NSFW-Caption-V4-GGUF"
+FILENAME = "Qwen3-VL-8B-NSFW-Caption-V4.Q8_0.gguf"
+MPROJ_FILENAME = "Qwen3-VL-8B-NSFW-Caption-V4.mmproj-Q8_0.gguf"
 
 # --- Configuration ---
 # Define the base Docker image from ghcr.io, a persistent volume for models,
@@ -24,7 +24,7 @@ model_volume = modal.Volume.from_name("llama-models-store", create_if_missing=Tr
 MODEL_DIR = "/models"
 download_image = (
     modal.Image.debian_slim(python_version="3.11")
-    .pip_install("huggingface_hub[hf_transfer]==0.26.2")
+    .pip_install("huggingface_hub", "hf-transfer")
     .env({"HF_HUB_ENABLE_HF_TRANSFER": "1"})
 )
 app = modal.App("llama-cpp-downloader")
