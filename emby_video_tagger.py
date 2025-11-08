@@ -51,6 +51,8 @@ from dotenv import load_dotenv
 from abc import ABC, abstractmethod
 import re
 import concurrent.futures
+from PIL import Image
+from io import BytesIO
 
 
 class TaskStatus(Enum):
@@ -192,8 +194,9 @@ class EmbyVideoTagger:
 class IntelligentFrameExtractor:
     """Extracts representative frames from videos using scene detection"""
 
-    def __init__(self, scene_threshold: float = 5.0): # default 27 for ContentDetector, 3 for AdaptiveDetector
+    def __init__(self, scene_threshold: float = 5.0, max_pixels: int = 800 * 800): # default 27 for ContentDetector, 3 for AdaptiveDetector
         self.scene_threshold = scene_threshold
+        self.max_pixels = max_pixels
         self.logger = logging.getLogger(__name__)
 
     def extract_representative_frames(
@@ -235,6 +238,32 @@ class IntelligentFrameExtractor:
         except Exception as e:
             self.logger.error(f"Scene detection failed for {video_path}: {e}")
             return self._fallback_extraction(video_path, output_path, max_frames)
+
+    def _resize_frame_if_needed(self, frame: bytes, filename: str) -> bytes:
+        """Resize frame if it exceeds max_pixels limit"""
+        try:
+            # Convert bytes to PIL Image
+            img = Image.open(BytesIO(frame))
+            
+            # Check if resizing is needed
+            if img.mode != "RGB":
+                img = img.convert("RGB")
+            
+            w, h = img.size
+            if w * h > self.max_pixels:
+                ratio = (self.max_pixels / (w * h)) ** 0.5
+                new_w, new_h = int(w * ratio), int(h * ratio)
+                img = img.resize((new_w, new_h), Image.LANCZOS)
+                self.logger.debug(f"Resized frame {filename} from {w}x{h} to {new_w}x{new_h}")
+            
+            # Convert back to bytes
+            buffer = BytesIO()
+            img.save(buffer, format="JPEG", quality=85)
+            return buffer.getvalue()
+            
+        except Exception as e:
+            self.logger.warning(f"Failed to resize frame {filename}: {e}")
+            return frame  # Return original frame if resizing fails
 
     def _extract_scene_frames(
         self, video_path: str, scene_list: List, output_dir: Path, max_frames: int
@@ -278,7 +307,17 @@ class IntelligentFrameExtractor:
                     filename = str(
                         output_dir / f"scene_{i:03d}_frame_{middle_frame:06d}.jpg"
                     )
-                    cv2.imwrite(filename, frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
+                    
+                    # First encode to bytes
+                    success, encoded_img = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
+                    if success:
+                        # Resize if needed
+                        resized_frame = self._resize_frame_if_needed(encoded_img.tobytes(), filename)
+                        
+                        # Write the (potentially resized) frame
+                        with open(filename, 'wb') as f:
+                            f.write(resized_frame)
+                    
                     extracted_frames.append((filename, middle_frame))
 
             except Exception as e:
@@ -314,7 +353,17 @@ class IntelligentFrameExtractor:
 
             if ret:
                 filename = str(output_dir / f"uniform_frame_{i:06d}.jpg")
-                cv2.imwrite(filename, frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
+                
+                # First encode to bytes
+                success, encoded_img = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
+                if success:
+                    # Resize if needed
+                    resized_frame = self._resize_frame_if_needed(encoded_img.tobytes(), filename)
+                    
+                    # Write the (potentially resized) frame
+                    with open(filename, 'wb') as f:
+                        f.write(resized_frame)
+                
                 extracted_frames.append((filename, i))
 
         cap.release()
@@ -665,7 +714,9 @@ class VideoTaggingAutomation:
             config["emby"]["api_key"],
             config["emby"]["user_id"],
         )
-        self.frame_extractor = IntelligentFrameExtractor()
+        self.frame_extractor = IntelligentFrameExtractor(
+            max_pixels=config.get("max_pixels", 800 * 800)
+        )
 
         # Create vision processor using factory pattern
         ai_provider = config.get("ai_provider", "lmstudio")
@@ -1286,6 +1337,7 @@ def main():
         "copy_favorites_to": os.getenv("COPY_FAVORITES_TO", "").strip(),
         "max_concurrent_videos": int(os.getenv("MAX_CONCURRENT_VIDEOS", "2")),  # Added
         "frame_cache_path": os.getenv("FRAME_CACHE_PATH", "/tmp/frame_cache"),
+        "max_pixels": int(os.getenv("MAX_PIXELS", str(800 * 800))),
     }
 
     # Validate configuration
