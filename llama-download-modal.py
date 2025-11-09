@@ -13,9 +13,12 @@ import subprocess
 #REPO_ID = "mradermacher/Qwen2.5-VL-7B-NSFW-Caption-V4-GGUF"
 #FILENAME = "Qwen2.5-VL-7B-NSFW-Caption-V4.Q8_0.gguf"
 #MPROJ_FILENAME = "Qwen2.5-VL-7B-NSFW-Caption-V4.mmproj-Q8_0.gguf"
-REPO_ID = "mradermacher/Qwen3-VL-8B-NSFW-Caption-V4-GGUF"
-FILENAME = "Qwen3-VL-8B-NSFW-Caption-V4.Q8_0.gguf"
-MPROJ_FILENAME = "Qwen3-VL-8B-NSFW-Caption-V4.mmproj-Q8_0.gguf"
+#REPO_ID = "mradermacher/Qwen3-VL-8B-NSFW-Caption-V4.5-GGUF"
+#FILENAME = "Qwen3-VL-8B-NSFW-Caption-V4.5.Q8_0.gguf"
+#MPROJ_FILENAME = "Qwen3-VL-8B-NSFW-Caption-V4.5.mmproj-Q8_0.gguf"
+REPO_ID = "mradermacher/Qwen3-VL-8B-Abliterated-Caption-it-GGUF"
+FILENAME = "Qwen3-VL-8B-Abliterated-Caption-it.Q8_0.gguf"
+MPROJ_FILENAME = "Qwen3-VL-8B-Abliterated-Caption-it.mmproj-Q8_0.gguf"
 
 # --- Configuration ---
 # Define the base Docker image from ghcr.io, a persistent volume for models,
