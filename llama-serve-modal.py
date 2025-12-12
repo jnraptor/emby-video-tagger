@@ -34,7 +34,7 @@ CTX_SIZE = "24576"  # 8192*3
 BATCH = "2048"
 UBATCH = "2048"
 PARALLEL = "3"
-API_KEY = "ByU8dGHlt8chOIKT"
+#API_KEY = "ByU8dGHlt8chOIKT"
 # TAG = "12.9.1-devel-ubuntu22.04"
 TAG = "13.0.2-devel-ubuntu24.04"
 GPU = "L4"  # T4, L4, A10 Available GPUs: https://modal.com/pricing, https://modal.com/docs/guide/gpu#specifying-gpu-type
@@ -51,7 +51,7 @@ llama_image = (
         "git", "build-essential", "cmake", "curl", "libcurl4-openssl-dev", "ccache"
     )
     .run_commands(
-        "git clone --depth 1 --branch b7356 https://github.com/ggml-org/llama.cpp",
+        "git clone --depth 1 --branch b7361 https://github.com/ggml-org/llama.cpp",
         force_build=False,
     )
     .run_commands("nvidia-smi", gpu=GPU)
@@ -75,7 +75,7 @@ llama_image = (
             "LLAMA_ARG_UBATCH": UBATCH,
             "LLAMA_ARG_N_GPU_LAYERS": N_GPU_LAYERS,
             "LLAMA_ARG_N_PARALLEL": PARALLEL,
-            "LLAMA_API_KEY": API_KEY,
+            #"LLAMA_API_KEY": API_KEY,
         }
     )
 )
@@ -89,6 +89,7 @@ app = modal.App("llama-cpp-server")
     timeout=60 * 5,  # 5 minutes max input runtime
     scaledown_window=300,  # Timeout after 5 minutes of inactivity.
     min_containers=1,  # Keep at least one container running for fast startup
+    secrets=[modal.Secret.from_name("LLAMA_API_KEY")], #load LLAMA_API_KEY from secrets
 )
 @modal.concurrent(max_inputs=3)
 @modal.web_server(port=8080, startup_timeout=180)
