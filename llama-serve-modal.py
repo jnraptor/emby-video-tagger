@@ -34,9 +34,8 @@ CTX_SIZE = "24576"  # 8192*3
 BATCH = "2048"
 UBATCH = "2048"
 PARALLEL = "3"
-#API_KEY = "ByU8dGHlt8chOIKT"
 # TAG = "12.9.1-devel-ubuntu22.04"
-TAG = "13.0.2-devel-ubuntu24.04"
+TAG = "13.1.0-devel-ubuntu24.04"
 GPU = "L4"  # T4, L4, A10 Available GPUs: https://modal.com/pricing, https://modal.com/docs/guide/gpu#specifying-gpu-type
 
 # --- Configuration ---
@@ -51,12 +50,12 @@ llama_image = (
         "git", "build-essential", "cmake", "curl", "libcurl4-openssl-dev", "ccache"
     )
     .run_commands(
-        "git clone --depth 1 --branch b7361 https://github.com/ggml-org/llama.cpp",
+        "git clone --depth 1 --branch b7502 https://github.com/ggml-org/llama.cpp",
         force_build=False,
     )
     .run_commands("nvidia-smi", gpu=GPU)
     .run_commands(  # https://developer.nvidia.com/cuda-gpus
-        'cmake llama.cpp -B llama.cpp/build -DBUILD_SHARED_LIBS=OFF -DGGML_CUDA=ON -DLLAMA_CURL=ON -DCMAKE_CUDA_ARCHITECTURES="75;80;86;89;90;100"',
+        'cmake llama.cpp -B llama.cpp/build -DBUILD_SHARED_LIBS=OFF -DGGML_CUDA=ON -DLLAMA_CURL=ON -DCMAKE_CUDA_ARCHITECTURES="75;80;86;89;90;100;103;120;121"',
         gpu=GPU,
     )
     .run_commands(  # this one takes a few minutes!
@@ -74,8 +73,7 @@ llama_image = (
             "LLAMA_ARG_BATCH": BATCH,
             "LLAMA_ARG_UBATCH": UBATCH,
             "LLAMA_ARG_N_GPU_LAYERS": N_GPU_LAYERS,
-            "LLAMA_ARG_N_PARALLEL": PARALLEL,
-            #"LLAMA_API_KEY": API_KEY,
+            "LLAMA_ARG_N_PARALLEL": PARALLEL
         }
     )
 )
