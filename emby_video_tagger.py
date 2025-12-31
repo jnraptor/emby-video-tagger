@@ -190,6 +190,73 @@ class EmbyVideoTagger:
             self.logger.error(f"Failed to update tags for item {item_id}: {e}")
             return False
 
+    def get_all_tags(self) -> List[str]:
+        """Retrieve all existing tags from the Emby library"""
+        url = f"{self.base_url}/emby/Tags"
+        
+        try:
+            response = self.session.get(url, timeout=30)
+            response.raise_for_status()
+            items = response.json().get("Items", [])
+            tags = [item.get("Name", "") for item in items if item.get("Name")]
+            self.logger.info(f"Retrieved {len(tags)} existing tags from Emby")
+            return tags
+        except Exception as e:
+            self.logger.warning(f"Failed to retrieve existing tags: {e}")
+            return []
+
+    def get_videos_with_tag(self, tag: str) -> List[Dict]:
+        """Retrieve all videos that have a specific tag"""
+        url = f"{self.base_url}/emby/Users/{self.user_id}/Items"
+        params = {
+            "Recursive": "true",
+            "IncludeItemTypes": "Video",
+            "Tags": tag,
+            "Fields": "Tags,TagItems",
+            "Limit": 10000,
+        }
+        
+        try:
+            response = self.session.get(url, params=params, timeout=60)
+            response.raise_for_status()
+            items = response.json().get("Items", [])
+            return items
+        except Exception as e:
+            self.logger.error(f"Failed to retrieve videos with tag '{tag}': {e}")
+            return []
+
+    def replace_tag_on_video(self, item_id: str, old_tag: str, new_tag: str) -> bool:
+        """Replace a specific tag with another on a video"""
+        url = f"{self.base_url}/emby/Items?Ids={item_id}&Fields=Path,Tags,TagItems,ProviderIds"
+        
+        try:
+            response = self.session.get(url)
+            response.raise_for_status()
+            video = response.json()
+            item = video["Items"][0]
+            
+            # Get current tags
+            current_tags = [x["Name"] if isinstance(x, dict) else x for x in item.get("TagItems", [])]
+            
+            # Replace old tag with new tag
+            if old_tag in current_tags:
+                current_tags.remove(old_tag)
+                if new_tag not in current_tags:
+                    current_tags.append(new_tag)
+                
+                item["Tags"] = current_tags
+                item["TagItems"] = current_tags
+                
+                update_url = f"{self.base_url}/emby/Items/{item_id}"
+                time.sleep(0.05)  # Rate limiting
+                response = self.session.post(update_url, json=item, timeout=30)
+                response.raise_for_status()
+                return True
+            return False
+        except Exception as e:
+            self.logger.error(f"Failed to replace tag on item {item_id}: {e}")
+            return False
+
 
 class IntelligentFrameExtractor:
     """Extracts representative frames from videos using scene detection"""
@@ -376,13 +443,24 @@ class BaseVisionProcessor(ABC):
     def __init__(self, model_name: str, max_concurrent_requests: int = 1):
         self.model_name = model_name
         self.max_concurrent_requests = max_concurrent_requests
-        self.tag_prompt = self._create_tagging_prompt()
+        self.base_tag_prompt = self._create_tagging_prompt()
         self.logger = logging.getLogger(__name__)
 
-    def _create_tagging_prompt(self) -> str:
-        return """
-        Analyze this video frame and generate descriptive tags for media organization.
+    def _create_tagging_prompt(self, existing_tags: List[str] = None) -> str:
+        existing_tags_section = ""
+        #if existing_tags:
+        #    tags_list = ", ".join(f'"{tag}"' for tag in existing_tags)
+        #    existing_tags_section = f"""
+        #IMPORTANT: The following tags already exist in the media library. 
+        #PRIORITIZE using these existing tags when they match what you see in the frame.
+        #Only create new tags if no existing tag adequately describes what you observe.
+        #
+        #Existing tags: [{tags_list}]
+        #"""
         
+        return f"""
+        Analyze this video frame and generate descriptive tags for media organization.
+        {existing_tags_section}
         Focus on:
         - Main subjects (people, objects, animals)
         - Activities and actions
@@ -391,14 +469,18 @@ class BaseVisionProcessor(ABC):
         - Technical aspects (lighting, composition)
         
         Return results as JSON:
-        {
+        {{
             "subjects": ["person", "car", "building"],
             "activities": ["walking", "driving", "talking"], 
             "setting": ["urban", "outdoor", "daytime"],
             "style": ["documentary", "handheld", "wide-shot"],
             "mood": ["energetic", "professional", "casual"]
-        }
+        }}
         """
+
+    def set_existing_tags(self, existing_tags: List[str]):
+        """Update the prompt with existing tags for prioritization"""
+        self.tag_prompt = self._create_tagging_prompt(existing_tags)
 
     def encode_image(self, image_path: str) -> str:
         """Convert image to base64 for API submission"""
@@ -430,6 +512,59 @@ class BaseVisionProcessor(ABC):
         # If no JSON found, return the original text
         return response_text.strip()
 
+    def _normalize_tag(self, tag: str) -> str:
+        """Normalize a tag to a canonical form for comparison"""
+        # Convert to lowercase and replace common separators with spaces
+        normalized = tag.lower().strip()
+        normalized = re.sub(r'[-_]+', ' ', normalized)
+        # Remove extra whitespace
+        normalized = re.sub(r'\s+', ' ', normalized)
+        return normalized
+
+    def _find_matching_existing_tag(self, new_tag: str, existing_tags: List[str]) -> Optional[str]:
+        """Find an existing tag that matches the new tag (accounting for variations)"""
+        new_normalized = self._normalize_tag(new_tag)
+        
+        for existing_tag in existing_tags:
+            if self._normalize_tag(existing_tag) == new_normalized:
+                return existing_tag
+        return None
+
+    def normalize_tags(self, tags: List[str], existing_tags: List[str] = None) -> List[str]:
+        """
+        Normalize and deduplicate tags, preferring existing tag forms.
+        Collapses similar tags like "action shot" and "action-shot" into one.
+        """
+        if existing_tags is None:
+            existing_tags = []
+        
+        normalized_map = {}  # normalized_form -> preferred_tag
+        result = []
+        
+        # First, add all existing tags to the map (they take priority)
+        for tag in existing_tags:
+            norm = self._normalize_tag(tag)
+            if norm not in normalized_map:
+                normalized_map[norm] = tag
+        
+        # Process new tags
+        for tag in tags:
+            norm = self._normalize_tag(tag)
+            
+            if norm in normalized_map:
+                # Use the existing/preferred form
+                preferred = normalized_map[norm]
+                if preferred not in result:
+                    result.append(preferred)
+            else:
+                # New unique tag - use space-separated form as canonical
+                canonical = norm  # Already normalized with spaces
+                normalized_map[norm] = canonical
+                if canonical not in result:
+                    result.append(canonical)
+        
+        return result
+
     def _process_frames_parallel(self, frame_paths: List[str], process_func) -> List[str]:
         """Process frames in parallel using ThreadPoolExecutor"""
         all_tags = []
@@ -458,9 +593,50 @@ class BaseVisionProcessor(ABC):
         return list(set(all_tags))
 
     @abstractmethod
-    def analyze_frames_sync(self, frame_paths: List[str]) -> List[str]:
+    def analyze_frames_sync(self, frame_paths: List[str], existing_tags: List[str] = None) -> List[str]:
         """Synchronous frame analysis for immediate processing"""
         pass
+
+    def analyze_tags_for_consolidation(self, tags: List[str], batch_size: int = 100) -> List[Tuple[str, str]]:
+        """Use LLM to find semantically similar tags that should be merged"""
+        merge_suggestions = []
+        
+        for i in range(0, len(tags), batch_size):
+            batch = tags[i:i + batch_size]
+            
+            prompt = f"""Analyze these media tags and identify pairs that are semantically identical 
+or very similar and should be merged. Only suggest merges for tags that mean the same thing.
+
+Tags: {json.dumps(batch)}
+
+Return a JSON array of merge suggestions. For each pair, choose the more succinct/common form as canonical.
+Format: [{{"merge": "tag_to_remove", "into": "canonical_tag"}}]
+
+Only include clear duplicates. Examples of valid merges:
+- "close up" and "closeup" -> keep "close up"
+- "night time" and "nighttime" -> keep "nighttime"  
+- "b&w" and "black and white" -> keep "black and white"
+
+Return empty array [] if no clear duplicates found."""
+
+            try:
+                result = self._send_text_prompt(prompt)
+                if result:
+                    json_match = re.search(r'\[.*\]', result, re.DOTALL)
+                    if json_match:
+                        suggestions = json.loads(json_match.group())
+                        for s in suggestions:
+                            if "merge" in s and "into" in s:
+                                merge_suggestions.append((s["merge"], s["into"]))
+            except Exception as e:
+                self.logger.error(f"LLM tag analysis failed for batch {i}: {e}")
+                continue
+                
+        return merge_suggestions
+
+    def _send_text_prompt(self, prompt: str) -> Optional[str]:
+        """Send a text-only prompt to the LLM. Override in subclasses."""
+        raise NotImplementedError("Subclass must implement _send_text_prompt for text analysis")
 
 
 class LMStudioVisionProcessor(BaseVisionProcessor):
@@ -505,9 +681,23 @@ class LMStudioVisionProcessor(BaseVisionProcessor):
         
         return []
 
-    def analyze_frames_sync(self, frame_paths: List[str]) -> List[str]:
+    def analyze_frames_sync(self, frame_paths: List[str], existing_tags: List[str] = None) -> List[str]:
         """Synchronous frame analysis for immediate processing"""
+        self.set_existing_tags(existing_tags or [])
         return self._process_frames_parallel(frame_paths, self._process_single_frame)
+
+    def _send_text_prompt(self, prompt: str) -> Optional[str]:
+        """Send a text-only prompt to LMStudio"""
+        try:
+            with lms.Client() as client:
+                model = client.llm.model(self.model_name)
+                chat = lms.Chat()
+                chat.add_user_message(prompt)
+                prediction = model.respond(chat)
+                return str(prediction)
+        except Exception as e:
+            self.logger.error(f"LMStudio text prompt failed: {e}")
+            return None
 
 
 class OllamaVisionProcessor(BaseVisionProcessor):
@@ -569,9 +759,23 @@ class OllamaVisionProcessor(BaseVisionProcessor):
         
         return []
 
-    def analyze_frames_sync(self, frame_paths: List[str]) -> List[str]:
+    def analyze_frames_sync(self, frame_paths: List[str], existing_tags: List[str] = None) -> List[str]:
         """Synchronous frame analysis for immediate processing using Ollama"""
+        self.set_existing_tags(existing_tags or [])
         return self._process_frames_parallel(frame_paths, self._process_single_frame)
+
+    def _send_text_prompt(self, prompt: str) -> Optional[str]:
+        """Send a text-only prompt to Ollama"""
+        try:
+            response = self.client.chat(
+                model=self.model_name,
+                messages=[{"role": "user", "content": prompt}],
+                options={"temperature": 0.1},
+            )
+            return response["message"]["content"]
+        except Exception as e:
+            self.logger.error(f"Ollama text prompt failed: {e}")
+            return None
 
 
 class APIVisionProcessor(BaseVisionProcessor):
@@ -670,9 +874,27 @@ class APIVisionProcessor(BaseVisionProcessor):
         
         return []
 
-    def analyze_frames_sync(self, frame_paths: List[str]) -> List[str]:
+    def analyze_frames_sync(self, frame_paths: List[str], existing_tags: List[str] = None) -> List[str]:
         """Synchronous frame analysis for immediate processing using Z.AI API"""
+        self.set_existing_tags(existing_tags or [])
         return self._process_frames_parallel(frame_paths, self._process_single_frame)
+
+    def _send_text_prompt(self, prompt: str) -> Optional[str]:
+        """Send a text-only prompt to Z.AI API"""
+        try:
+            payload = {
+                "model": self.model_name,
+                "messages": [{"role": "user", "content": prompt}],
+            }
+            response = requests.post(self.base_url, headers=self.headers, json=payload)
+            if response.status_code == 200:
+                return response.json()["choices"][0]["message"]["content"]
+            else:
+                self.logger.error(f"API text prompt failed: {response.status_code}")
+                return None
+        except Exception as e:
+            self.logger.error(f"API text prompt failed: {e}")
+            return None
 
 
 class VisionProcessorFactory:
@@ -702,6 +924,188 @@ class VisionProcessorFactory:
             raise ValueError(
                 f"Unsupported AI provider: {provider}. Supported providers: lmstudio, ollama, api"
             )
+
+
+class TagConsolidator:
+    """Consolidates similar tags in Emby library to reduce tag count"""
+
+    def __init__(self, emby_client: EmbyVideoTagger, vision_processor: Optional[BaseVisionProcessor] = None):
+        self.emby_client = emby_client
+        self.vision_processor = vision_processor
+        self.logger = logging.getLogger(__name__)
+
+    def _normalize_tag(self, tag: str) -> str:
+        """Normalize a tag to canonical form"""
+        normalized = tag.lower().strip()
+        normalized = re.sub(r'[-_]+', ' ', normalized)
+        normalized = re.sub(r'\s+', ' ', normalized)
+        return normalized
+
+    def find_duplicate_groups(self, tags: List[str]) -> Dict[str, List[str]]:
+        """Group tags by their normalized form to find duplicates"""
+        groups = {}
+        for tag in tags:
+            norm = self._normalize_tag(tag)
+            if norm not in groups:
+                groups[norm] = []
+            groups[norm].append(tag)
+        
+        # Return only groups with duplicates
+        return {k: v for k, v in groups.items() if len(v) > 1}
+
+    def choose_canonical_tag(self, tag_variants: List[str]) -> str:
+        """Choose the best canonical form from variants (prefer space-separated, lowercase)"""
+        # Prefer the shortest tag that uses spaces (not hyphens/underscores)
+        space_tags = [t for t in tag_variants if '-' not in t and '_' not in t]
+        if space_tags:
+            return min(space_tags, key=len)
+        return min(tag_variants, key=len)
+
+    def find_semantic_duplicates_llm(self, tags: List[str], batch_size: int = 1000) -> List[Tuple[str, str]]:
+        """Use configured LLM to find semantically similar tags that should be merged"""
+        if not self.vision_processor:
+            self.logger.warning("No vision processor configured for semantic analysis")
+            return []
+
+        return self.vision_processor.analyze_tags_for_consolidation(tags, batch_size)
+
+    def consolidate_tags(
+        self, 
+        dry_run: bool = True, 
+        use_llm: bool = False,
+        interactive: bool = True
+    ) -> Dict[str, any]:
+        """
+        Main consolidation function.
+        
+        Args:
+            dry_run: If True, only report what would be done without making changes
+            use_llm: If True, also use LLM to find semantic duplicates
+            interactive: If True, prompt for confirmation before each merge
+        
+        Returns:
+            Statistics about the consolidation
+        """
+        self.logger.info("Starting tag consolidation...")
+        
+        # Get all tags
+        all_tags = self.emby_client.get_all_tags()
+        self.logger.info(f"Found {len(all_tags)} total tags")
+        
+        stats = {
+            "total_tags": len(all_tags),
+            "duplicate_groups": 0,
+            "tags_merged": 0,
+            "videos_updated": 0,
+            "merge_details": []
+        }
+        
+        # Find rule-based duplicates (normalization)
+        duplicate_groups = self.find_duplicate_groups(all_tags)
+        stats["duplicate_groups"] = len(duplicate_groups)
+        
+        self.logger.info(f"Found {len(duplicate_groups)} groups of duplicate tags")
+        
+        # Process each duplicate group
+        for norm_form, variants in duplicate_groups.items():
+            canonical = self.choose_canonical_tag(variants)
+            tags_to_merge = [t for t in variants if t != canonical]
+            
+            if not tags_to_merge:
+                continue
+                
+            merge_info = {
+                "canonical": canonical,
+                "merged": tags_to_merge,
+                "videos_affected": 0
+            }
+            
+            print(f"\nDuplicate group: {variants}")
+            print(f"  -> Canonical form: '{canonical}'")
+            print(f"  -> Will merge: {tags_to_merge}")
+            
+            if interactive and not dry_run:
+                confirm = input("  Proceed with merge? [y/N]: ").strip().lower()
+                if confirm != 'y':
+                    print("  Skipped.")
+                    continue
+            
+            if not dry_run:
+                for old_tag in tags_to_merge:
+                    videos = self.emby_client.get_videos_with_tag(old_tag)
+                    self.logger.info(f"Found {len(videos)} videos with tag '{old_tag}'")
+                    
+                    for video in videos:
+                        success = self.emby_client.replace_tag_on_video(
+                            video["Id"], old_tag, canonical
+                        )
+                        if success:
+                            merge_info["videos_affected"] += 1
+                            stats["videos_updated"] += 1
+                    
+                    stats["tags_merged"] += 1
+            
+            stats["merge_details"].append(merge_info)
+        
+        # Optional: LLM-based semantic duplicate detection
+        if use_llm:
+            self.logger.info("Running LLM-based semantic analysis...")
+            # Get updated tag list (excluding already merged)
+            remaining_tags = [t for t in all_tags 
+                           if not any(t in d["merged"] for d in stats["merge_details"])]
+            
+            semantic_merges = self.find_semantic_duplicates_llm(remaining_tags)
+            
+            for old_tag, canonical in semantic_merges:
+                if old_tag not in remaining_tags or canonical not in remaining_tags:
+                    continue
+                    
+                print(f"\nSemantic duplicate found:")
+                print(f"  '{old_tag}' -> '{canonical}'")
+                
+                if interactive and not dry_run:
+                    confirm = input("  Proceed with merge? [y/N]: ").strip().lower()
+                    if confirm != 'y':
+                        print("  Skipped.")
+                        continue
+                
+                merge_info = {
+                    "canonical": canonical,
+                    "merged": [old_tag],
+                    "videos_affected": 0,
+                    "semantic": True
+                }
+                
+                if not dry_run:
+                    videos = self.emby_client.get_videos_with_tag(old_tag)
+                    self.logger.info(f"Found {len(videos)} videos with tag '{old_tag}'")
+                    for video in videos:
+                        success = self.emby_client.replace_tag_on_video(
+                            video["Id"], old_tag, canonical
+                        )
+                        if success:
+                            merge_info["videos_affected"] += 1
+                            stats["videos_updated"] += 1
+                    stats["tags_merged"] += 1
+                
+                stats["merge_details"].append(merge_info)
+        
+        return stats
+
+    def print_stats(self, stats: Dict):
+        """Print consolidation statistics"""
+        print("\n" + "=" * 50)
+        print("TAG CONSOLIDATION SUMMARY")
+        print("=" * 50)
+        print(f"Total tags in library: {stats['total_tags']}")
+        print(f"Duplicate groups found: {stats['duplicate_groups']}")
+        print(f"Tags merged: {stats['tags_merged']}")
+        print(f"Videos updated: {stats['videos_updated']}")
+        
+        if stats['merge_details']:
+            print(f"\nEstimated tags after consolidation: "
+                  f"{stats['total_tags'] - stats['tags_merged']}")
+        print("=" * 50)
 
 
 class VideoTaggingAutomation:
@@ -881,7 +1285,11 @@ class VideoTaggingAutomation:
 
             self.logger.info(f"Found {len(frame_paths)} cached frames for analysis.")
 
-            tags = self.vision_processor.analyze_frames_sync(frame_paths)
+            # Get all existing tags from Emby library for prioritization
+            all_existing_tags = self.emby_client.get_all_tags()
+            
+            # Pass existing tags to the vision processor for prioritization
+            tags = self.vision_processor.analyze_frames_sync(frame_paths, all_existing_tags)
 
             if not tags:
                 raise ValueError("No tags were generated from frame analysis.")
@@ -891,13 +1299,25 @@ class VideoTaggingAutomation:
             response.raise_for_status()
             video_details = response.json()["Items"][0]
 
-            existing_tags = [x["Name"] for x in video_details.get("TagItems", [])]
-            all_tags = list(set(existing_tags + tags + ["ai-generated"]))
+            existing_video_tags = [x["Name"] for x in video_details.get("TagItems", [])]
+            
+            # Normalize and deduplicate tags, preferring existing tag forms
+            normalized_new_tags = self.vision_processor.normalize_tags(tags, all_existing_tags)
+            
+            # Combine with existing video tags and add ai-generated marker
+            combined_tags = existing_video_tags + normalized_new_tags + ["ai-generated"]
+            
+            # Final normalization pass to collapse any duplicates
+            all_tags = self.vision_processor.normalize_tags(combined_tags, all_existing_tags)
+            
+            # Ensure ai-generated is present
+            if "ai-generated" not in all_tags:
+                all_tags.append("ai-generated")
 
             success = self.emby_client.update_video_tags(video_id, all_tags)
             if success:
-                self.logger.info(f"Successfully updated {video_name} with {len(tags)} new tags.")
-                self._update_task_status(video_id, TaskStatus.COMPLETED, tag_count=len(tags))
+                self.logger.info(f"Successfully updated {video_name} with {len(normalized_new_tags)} new tags.")
+                self._update_task_status(video_id, TaskStatus.COMPLETED, tag_count=len(normalized_new_tags))
 
                 try:
                     shutil.rmtree(frame_cache_dir)
@@ -1402,6 +1822,26 @@ def main():
             print(
                 f"Manual processing {'succeeded' if success else 'failed'} for video {video_id}"
             )
+        elif command == "consolidate-tags":
+            # Consolidate duplicate tags
+            dry_run = "--dry-run" in sys.argv
+            use_llm = "--use-llm" in sys.argv
+            no_interactive = "--no-interactive" in sys.argv
+            
+            # Use the same vision processor configured for tagging
+            vision_processor = automation.vision_processor if use_llm else None
+            
+            consolidator = TagConsolidator(automation.emby_client, vision_processor)
+            
+            if dry_run:
+                print("DRY RUN MODE - No changes will be made\n")
+            
+            stats = consolidator.consolidate_tags(
+                dry_run=dry_run,
+                use_llm=use_llm,
+                interactive=not no_interactive and not dry_run
+            )
+            consolidator.print_stats(stats)
         else:
             print("Usage:")
             print("  python emby_video_tagger.py                    # Run scheduled automation")
@@ -1413,6 +1853,11 @@ def main():
             print("  python emby_video_tagger.py analyze            # Run frame analysis pass")
             print("  python emby_video_tagger.py stats              # Show processing statistics")
             print("  python emby_video_tagger.py manual <video_id>  # Process specific video")
+            print("  python emby_video_tagger.py consolidate-tags   # Consolidate duplicate tags")
+            print("    Options:")
+            print("      --dry-run        Show what would be merged without making changes")
+            print("      --use-llm        Use LLM to find semantic duplicates (requires Ollama)")
+            print("      --no-interactive Skip confirmation prompts")
     else:
         # Run with scheduling
         automation.run_scheduler()
