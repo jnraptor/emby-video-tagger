@@ -443,24 +443,14 @@ class BaseVisionProcessor(ABC):
     def __init__(self, model_name: str, max_concurrent_requests: int = 1):
         self.model_name = model_name
         self.max_concurrent_requests = max_concurrent_requests
-        self.base_tag_prompt = self._create_tagging_prompt()
+        self.existing_tags = []
+        self.tag_prompt = self._create_tagging_prompt()
         self.logger = logging.getLogger(__name__)
 
     def _create_tagging_prompt(self, existing_tags: List[str] = None) -> str:
-        existing_tags_section = ""
-        #if existing_tags:
-        #    tags_list = ", ".join(f'"{tag}"' for tag in existing_tags)
-        #    existing_tags_section = f"""
-        #IMPORTANT: The following tags already exist in the media library. 
-        #PRIORITIZE using these existing tags when they match what you see in the frame.
-        #Only create new tags if no existing tag adequately describes what you observe.
-        #
-        #Existing tags: [{tags_list}]
-        #"""
-        
-        return f"""
+        return """
         Analyze this video frame and generate descriptive tags for media organization.
-        {existing_tags_section}
+        
         Focus on:
         - Main subjects (people, objects, animals)
         - Activities and actions
@@ -469,18 +459,19 @@ class BaseVisionProcessor(ABC):
         - Technical aspects (lighting, composition)
         
         Return results as JSON:
-        {{
+        {
             "subjects": ["person", "car", "building"],
             "activities": ["walking", "driving", "talking"], 
             "setting": ["urban", "outdoor", "daytime"],
             "style": ["documentary", "handheld", "wide-shot"],
             "mood": ["energetic", "professional", "casual"]
-        }}
+        }
         """
 
     def set_existing_tags(self, existing_tags: List[str]):
-        """Update the prompt with existing tags for prioritization"""
-        self.tag_prompt = self._create_tagging_prompt(existing_tags)
+        """Store existing tags for post-processing comparison"""
+        self.existing_tags = existing_tags or []
+        self.tag_prompt = self._create_tagging_prompt()
 
     def encode_image(self, image_path: str) -> str:
         """Convert image to base64 for API submission"""
@@ -534,9 +525,10 @@ class BaseVisionProcessor(ABC):
         """
         Normalize and deduplicate tags, preferring existing tag forms.
         Collapses similar tags like "action shot" and "action-shot" into one.
+        Uses self.existing_tags if existing_tags not provided.
         """
         if existing_tags is None:
-            existing_tags = []
+            existing_tags = self.existing_tags or []
         
         normalized_map = {}  # normalized_form -> preferred_tag
         result = []
