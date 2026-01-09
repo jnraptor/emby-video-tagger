@@ -49,7 +49,7 @@ llama_image = (
         "git", "build-essential", "cmake", "curl", "libcurl4-openssl-dev", "ccache"
     )
     .run_commands(
-        "git clone --depth 1 --branch b7642 https://github.com/ggml-org/llama.cpp",
+        "git clone --depth 1 --branch b7682 https://github.com/ggml-org/llama.cpp",
         force_build=False,
     )
     .run_commands("nvidia-smi", gpu=GPU)
