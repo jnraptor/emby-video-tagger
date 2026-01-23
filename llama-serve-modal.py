@@ -34,7 +34,7 @@ BATCH = "2048"
 UBATCH = "2048"
 PARALLEL = "3"
 # TAG = "12.9.1-devel-ubuntu22.04"
-TAG = "13.1.0-devel-ubuntu24.04"
+TAG = "13.1.1-devel-ubuntu24.04"
 GPU = "L4"  # T4, L4, A10 Available GPUs: https://modal.com/pricing, https://modal.com/docs/guide/gpu#specifying-gpu-type
 
 # --- Configuration ---
@@ -49,7 +49,7 @@ llama_image = (
         "git", "build-essential", "cmake", "curl", "libcurl4-openssl-dev", "ccache"
     )
     .run_commands(
-        "git clone --depth 1 --branch b7783 https://github.com/ggml-org/llama.cpp",
+        "git clone --depth 1 --branch b7814 https://github.com/ggml-org/llama.cpp",
         force_build=False,
     )
     .run_commands("nvidia-smi", gpu=GPU)
