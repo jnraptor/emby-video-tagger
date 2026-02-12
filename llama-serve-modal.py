@@ -49,7 +49,7 @@ llama_image = (
         "git", "build-essential", "cmake", "curl", "libcurl4-openssl-dev", "ccache"
     )
     .run_commands(
-        "git clone --depth 1 --branch b7964 https://github.com/ggml-org/llama.cpp",
+        "git clone --depth 1 --branch b8007 https://github.com/ggml-org/llama.cpp",
         force_build=False,
     )
     .run_commands("nvidia-smi", gpu=GPU)
@@ -93,7 +93,7 @@ app = modal.App("llama-cpp-server")
 def serve():
     import subprocess
 
-    cmd = ["/llama.cpp/llama-server --port 8080 --host 0.0.0.0"]
+    cmd = ["/llama.cpp/llama-server --port 8080 --host 0.0.0.0 --fit on"]
     print(cmd)
     subprocess.Popen(" ".join(cmd), shell=True)
     print("Serving llama.cpp API on port 8080")
