@@ -24,14 +24,16 @@ from pathlib import Path
 import modal
 
 # --- Variables ---
-FILENAME = "Qwen3-VL-8B-NSFW-Caption-V4.5.Q8_0.gguf"
-MPROJ_FILENAME = "Qwen3-VL-8B-NSFW-Caption-V4.5.mmproj-Q8_0.gguf"
+#FILENAME = "Qwen3-VL-8B-NSFW-Caption-V4.5.Q8_0.gguf"
+#MPROJ_FILENAME = "Qwen3-VL-8B-NSFW-Caption-V4.5.mmproj-Q8_0.gguf"
+FILENAME = "Qwen3.5-4B_Abliterated.Q8_0.gguf"
+MPROJ_FILENAME = "Qwen3.5-4B_Abliterated.mmproj-Q8_0.gguf"
 #FILENAME = "Llama-3.3_8B_Abliterated-Q8_0.gguf"
 ALIAS = "InternVL3_5-1B"
 N_GPU_LAYERS = "99"
 CTX_SIZE = "24576"  # 8192*3
 BATCH = "2048"
-UBATCH = "2048"
+UBATCH = "512"
 PARALLEL = "3"
 # TAG = "12.9.1-devel-ubuntu22.04"
 TAG = "13.1.1-devel-ubuntu24.04"
@@ -49,7 +51,7 @@ llama_image = (
         "git", "build-essential", "cmake", "curl", "libcurl4-openssl-dev", "ccache"
     )
     .run_commands(
-        "git clone --depth 1 --branch b8124 https://github.com/ggml-org/llama.cpp",
+        "git clone --depth 1 --branch b8192 https://github.com/ggml-org/llama.cpp",
         force_build=False,
     )
     .run_commands("nvidia-smi", gpu=GPU)
