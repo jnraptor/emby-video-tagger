@@ -28,6 +28,8 @@ import modal
 #MPROJ_FILENAME = "Qwen3-VL-8B-NSFW-Caption-V4.5.mmproj-Q8_0.gguf"
 FILENAME = "Qwen3.5-4B_Abliterated.Q8_0.gguf"
 MPROJ_FILENAME = "Qwen3.5-4B_Abliterated.mmproj-Q8_0.gguf"
+#FILENAME = "Qwen3.5-9B-ultra-heretic-Q8_0.gguf"
+#MPROJ_FILENAME = "Qwen3.5-9B-mmproj-BF16.gguf"
 #FILENAME = "Llama-3.3_8B_Abliterated-Q8_0.gguf"
 ALIAS = "InternVL3_5-1B"
 N_GPU_LAYERS = "99"
@@ -48,15 +50,19 @@ llama_image = (
     # modal.Image.from_registry("ghcr.io/ggml-org/llama.cpp:server-cuda", add_python="3.11")
     modal.Image.from_registry(f"nvidia/cuda:{TAG}", add_python="3.12")
     .apt_install(
-        "git", "build-essential", "cmake", "curl", "libcurl4-openssl-dev", "ccache"
+        "git", "build-essential", "cmake", "curl", "libcurl4-openssl-dev", "libssl-dev", "ccache"
     )
     .run_commands(
-        "git clone --depth 1 --branch b8192 https://github.com/ggml-org/llama.cpp",
+        "apt dist-upgrade -y",
+        force_build=False,
+    )
+    .run_commands(
+        "git clone --depth 1 --branch b8198 https://github.com/ggml-org/llama.cpp",
         force_build=False,
     )
     .run_commands("nvidia-smi", gpu=GPU)
     .run_commands(  # https://developer.nvidia.com/cuda-gpus
-        'cmake llama.cpp -B llama.cpp/build -DBUILD_SHARED_LIBS=OFF -DGGML_CUDA=ON -DLLAMA_CURL=ON -DCMAKE_CUDA_ARCHITECTURES="75;80;86;89;90;100;103;120;121"',
+        'cmake llama.cpp -B llama.cpp/build -DBUILD_SHARED_LIBS=OFF -DGGML_CUDA=ON -DCMAKE_CUDA_ARCHITECTURES="75;80;86;89;90;100;103;120;121"',
         gpu=GPU,
     )
     .run_commands(  # this one takes a few minutes!
