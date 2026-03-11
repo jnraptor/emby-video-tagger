@@ -26,10 +26,8 @@ import modal
 # --- Variables ---
 #FILENAME = "Qwen3-VL-8B-NSFW-Caption-V4.5.Q8_0.gguf"
 #MPROJ_FILENAME = "Qwen3-VL-8B-NSFW-Caption-V4.5.mmproj-Q8_0.gguf"
-FILENAME = "Qwen3.5-4B_Abliterated.Q8_0.gguf"
-MPROJ_FILENAME = "Qwen3.5-4B_Abliterated.mmproj-Q8_0.gguf"
-#FILENAME = "Qwen3.5-9B-ultra-heretic-Q8_0.gguf"
-#MPROJ_FILENAME = "Qwen3.5-9B-mmproj-BF16.gguf"
+FILENAME = "Gliese-Qwen3.5-4B-Abliterated-Caption.Q8_0.gguf"
+MPROJ_FILENAME = "Gliese-Qwen3.5-4B-Abliterated-Caption.mmproj-q8_0.gguf"
 #FILENAME = "Llama-3.3_8B_Abliterated-Q8_0.gguf"
 ALIAS = "InternVL3_5-1B"
 N_GPU_LAYERS = "99"
@@ -57,7 +55,7 @@ llama_image = (
         force_build=False,
     )
     .run_commands(
-        "git clone --depth 1 --branch b8198 https://github.com/ggml-org/llama.cpp",
+        "git clone --depth 1 --branch b8272 https://github.com/ggml-org/llama.cpp",
         force_build=False,
     )
     .run_commands("nvidia-smi", gpu=GPU)

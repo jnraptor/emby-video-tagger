@@ -13,12 +13,9 @@ import subprocess
 #REPO_ID = "mradermacher/Qwen3-VL-8B-NSFW-Caption-V4.5-GGUF"
 #FILENAME = "Qwen3-VL-8B-NSFW-Caption-V4.5.Q8_0.gguf"
 #MPROJ_FILENAME = "Qwen3-VL-8B-NSFW-Caption-V4.5.mmproj-Q8_0.gguf"
-#REPO_ID = "mradermacher/Qwen3.5-4B_Abliterated-GGUF"
-#FILENAME = "Qwen3.5-4B_Abliterated.Q8_0.gguf"
-#MPROJ_FILENAME = "Qwen3.5-4B_Abliterated.mmproj-Q8_0.gguf"
-REPO_ID = "llmfan46/Qwen3.5-9B-ultra-heretic-GGUF"
-FILENAME = "Qwen3.5-9B-ultra-heretic-Q8_0.gguf"
-MPROJ_FILENAME = "Qwen3.5-9B-mmproj-BF16.gguf"
+REPO_ID = "prithivMLmods/Gliese-Qwen3.5-4B-Abliterated-Caption"
+FILENAME = "Gliese-Qwen3.5-4B-Abliterated-Caption.Q8_0.gguf"
+MPROJ_FILENAME = "Gliese-Qwen3.5-4B-Abliterated-Caption.mmproj-q8_0.gguf"
 
 # --- Configuration ---
 # Define the base Docker image from ghcr.io, a persistent volume for models,
@@ -49,6 +46,7 @@ def download_model(repo_id: str, filename: str, mproj_filename: str = None):
         print(f"Downloading model: {repo_id}/{filename}...")
         hf_hub_download(
             repo_id=repo_id,
+            #subfolder="GGUF",
             filename=filename,
             local_dir=MODEL_DIR
         )
@@ -62,6 +60,7 @@ def download_model(repo_id: str, filename: str, mproj_filename: str = None):
             print(f"Downloading mmproj: {repo_id}/{mproj_filename}...")
             hf_hub_download(
                 repo_id=repo_id,
+                #subfolder="GGUF",
                 filename=mproj_filename,
                 local_dir=MODEL_DIR
             )
