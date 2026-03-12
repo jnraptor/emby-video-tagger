@@ -24,10 +24,8 @@ from pathlib import Path
 import modal
 
 # --- Variables ---
-#FILENAME = "Qwen3-VL-8B-NSFW-Caption-V4.5.Q8_0.gguf"
-#MPROJ_FILENAME = "Qwen3-VL-8B-NSFW-Caption-V4.5.mmproj-Q8_0.gguf"
-FILENAME = "Gliese-Qwen3.5-4B-Abliterated-Caption.Q8_0.gguf"
-MPROJ_FILENAME = "Gliese-Qwen3.5-4B-Abliterated-Caption.mmproj-q8_0.gguf"
+FILENAME = "Qwen3-VL-8B-NSFW-Caption-V4.5.Q8_0.gguf"
+MPROJ_FILENAME = "Qwen3-VL-8B-NSFW-Caption-V4.5.mmproj-Q8_0.gguf"
 #FILENAME = "Llama-3.3_8B_Abliterated-Q8_0.gguf"
 ALIAS = "InternVL3_5-1B"
 N_GPU_LAYERS = "99"
