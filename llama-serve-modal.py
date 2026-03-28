@@ -34,7 +34,7 @@ BATCH = "2048"
 UBATCH = "512"
 PARALLEL = "3"
 # TAG = "12.9.1-devel-ubuntu22.04"
-TAG = "13.1.1-devel-ubuntu24.04"
+TAG = "13.2.0-devel-ubuntu24.04"
 GPU = "L4"  # T4, L4, A10 Available GPUs: https://modal.com/pricing, https://modal.com/docs/guide/gpu#specifying-gpu-type
 
 # --- Configuration ---
@@ -53,7 +53,7 @@ llama_image = (
         force_build=False,
     )
     .run_commands(
-        "git clone --depth 1 --branch b8272 https://github.com/ggml-org/llama.cpp",
+        "git clone --depth 1 --branch b8570 https://github.com/ggml-org/llama.cpp",
         force_build=False,
     )
     .run_commands("nvidia-smi", gpu=GPU)
@@ -86,6 +86,7 @@ app = modal.App("llama-cpp-server")
 @app.function(
     image=llama_image,
     gpu=GPU,
+    #cpu=8.0, #default is 0.125
     volumes={MODEL_DIR: model_volume},
     timeout=60 * 5,  # 5 minutes max input runtime
     scaledown_window=300,  # Timeout after 5 minutes of inactivity.
