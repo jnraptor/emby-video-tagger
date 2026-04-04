@@ -53,9 +53,10 @@ llama_image = (
         force_build=False,
     )
     .run_commands(
-        "git clone --depth 1 --branch b8570 https://github.com/ggml-org/llama.cpp",
+        "git clone --depth 1 --branch b8660 https://github.com/ggml-org/llama.cpp",
         force_build=False,
     )
+    .run_commands("lscpu")
     .run_commands("nvidia-smi", gpu=GPU)
     .run_commands(  # https://developer.nvidia.com/cuda-gpus
         'cmake llama.cpp -B llama.cpp/build -DBUILD_SHARED_LIBS=OFF -DGGML_CUDA=ON -DCMAKE_CUDA_ARCHITECTURES="75;80;86;89;90;100;103;120;121"',
