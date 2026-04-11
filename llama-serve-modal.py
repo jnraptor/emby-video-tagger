@@ -53,7 +53,7 @@ llama_image = (
         force_build=False,
     )
     .run_commands(
-        "git clone --depth 1 --branch b8660 https://github.com/ggml-org/llama.cpp",
+        "git clone --depth 1 --branch b8761 https://github.com/ggml-org/llama.cpp",
         force_build=False,
     )
     .run_commands("lscpu")
@@ -87,7 +87,7 @@ app = modal.App("llama-cpp-server")
 @app.function(
     image=llama_image,
     gpu=GPU,
-    #cpu=8.0, #default is 0.125
+    cpu=8.0, #default is 0.125
     volumes={MODEL_DIR: model_volume},
     timeout=60 * 5,  # 5 minutes max input runtime
     scaledown_window=300,  # Timeout after 5 minutes of inactivity.
