@@ -26,7 +26,9 @@ import modal
 # --- Variables ---
 FILENAME = "Qwen3-VL-8B-NSFW-Caption-V4.5.Q8_0.gguf"
 MPROJ_FILENAME = "Qwen3-VL-8B-NSFW-Caption-V4.5.mmproj-Q8_0.gguf"
-#FILENAME = "Llama-3.3_8B_Abliterated-Q8_0.gguf"
+#FILENAME = "gemma-4-E4B-it-Claude-Opus-4.5-HERETIC-UNCENSORED-Thinking.Q8_0.gguf"
+#MPROJ_FILENAME = "gemma-4-E4B-it-Claude-Opus-4.5-HERETIC-UNCENSORED-Thinking.mmproj-Q8_0.gguf"
+#CHAT_TEMPLATE_FILE = "chat_template-instruct.jinja"
 ALIAS = "InternVL3_5-1B"
 N_GPU_LAYERS = "99"
 CTX_SIZE = "24576"  # 8192*3
@@ -34,7 +36,7 @@ BATCH = "2048"
 UBATCH = "512"
 PARALLEL = "3"
 # TAG = "12.9.1-devel-ubuntu22.04"
-TAG = "13.2.0-devel-ubuntu24.04"
+TAG = "13.0.3-devel-ubuntu24.04"
 GPU = "L4"  # T4, L4, A10 Available GPUs: https://modal.com/pricing, https://modal.com/docs/guide/gpu#specifying-gpu-type
 
 # --- Configuration ---
@@ -53,7 +55,7 @@ llama_image = (
         force_build=False,
     )
     .run_commands(
-        "git clone --depth 1 --branch b8761 https://github.com/ggml-org/llama.cpp",
+        "git clone --depth 1 --branch b8829 https://github.com/ggml-org/llama.cpp",
         force_build=False,
     )
     .run_commands("lscpu")
@@ -72,6 +74,7 @@ llama_image = (
         {
             "LLAMA_ARG_MODEL": f"{MODEL_DIR}/{FILENAME}",
             "LLAMA_ARG_MMPROJ": f"{MODEL_DIR}/{MPROJ_FILENAME}",
+            #"LLAMA_ARG_CHAT_TEMPLATE_FILE": f"{MODEL_DIR}/{CHAT_TEMPLATE_FILE}",
             "LLAMA_ARG_ALIAS": ALIAS,
             "LLAMA_ARG_CTX_SIZE": CTX_SIZE,
             "LLAMA_ARG_BATCH": BATCH,
@@ -99,7 +102,7 @@ app = modal.App("llama-cpp-server")
 def serve():
     import subprocess
 
-    cmd = ["/llama.cpp/llama-server --port 8080 --host 0.0.0.0 --fit on"]
+    cmd = ["/llama.cpp/llama-server --port 8080 --host 0.0.0.0 --fit on --jinja"]
     print(cmd)
     subprocess.Popen(" ".join(cmd), shell=True)
     print("Serving llama.cpp API on port 8080")
