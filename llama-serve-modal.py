@@ -24,10 +24,10 @@ from pathlib import Path
 import modal
 
 # --- Variables ---
-FILENAME = "Qwen3-VL-8B-NSFW-Caption-V4.5.Q8_0.gguf"
-MPROJ_FILENAME = "Qwen3-VL-8B-NSFW-Caption-V4.5.mmproj-Q8_0.gguf"
-#FILENAME = "gemma-4-E4B-it-Claude-Opus-4.5-HERETIC-UNCENSORED-Thinking.Q8_0.gguf"
-#MPROJ_FILENAME = "gemma-4-E4B-it-Claude-Opus-4.5-HERETIC-UNCENSORED-Thinking.mmproj-Q8_0.gguf"
+#FILENAME = "Qwen3-VL-8B-NSFW-Caption-V4.5.Q8_0.gguf"
+#MPROJ_FILENAME = "Qwen3-VL-8B-NSFW-Caption-V4.5.mmproj-Q8_0.gguf"
+FILENAME = "Qwen3.5-9B-Claude-4.6-HighIQ-INSTRUCT-HERETIC-UNCENSORED.Q8_0.gguf"
+MPROJ_FILENAME = "Qwen3.5-9B-Claude-4.6-HighIQ-INSTRUCT-HERETIC-UNCENSORED.mmproj-Q8_0.gguf"
 #CHAT_TEMPLATE_FILE = "chat_template-instruct.jinja"
 ALIAS = "InternVL3_5-1B"
 N_GPU_LAYERS = "99"
@@ -36,7 +36,7 @@ BATCH = "2048"
 UBATCH = "512"
 PARALLEL = "3"
 # TAG = "12.9.1-devel-ubuntu22.04"
-TAG = "13.0.3-devel-ubuntu24.04"
+TAG = "13.2.1-devel-ubuntu24.04"
 GPU = "L4"  # T4, L4, A10 Available GPUs: https://modal.com/pricing, https://modal.com/docs/guide/gpu#specifying-gpu-type
 
 # --- Configuration ---
@@ -55,7 +55,7 @@ llama_image = (
         force_build=False,
     )
     .run_commands(
-        "git clone --depth 1 --branch b8829 https://github.com/ggml-org/llama.cpp",
+        "git clone --depth 1 --branch b8855 https://github.com/ggml-org/llama.cpp",
         force_build=False,
     )
     .run_commands("lscpu")
