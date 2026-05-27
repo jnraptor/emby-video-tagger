@@ -55,7 +55,7 @@ llama_image = (
         force_build=False,
     )
     .run_commands(
-        "git clone --depth 1 --branch b9071 https://github.com/ggml-org/llama.cpp",
+        "git clone --depth 1 --branch b9352 https://github.com/ggml-org/llama.cpp",
         force_build=False,
     )
     .run_commands("lscpu")
