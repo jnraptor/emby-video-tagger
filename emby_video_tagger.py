@@ -26,26 +26,21 @@ Environment Variables:
 import requests
 import cv2
 import lmstudio as lms
-import ollama
 from ollama import Client
 import base64
 import json
 import time
 import logging
 import sqlite3
-import asyncio
 from pathlib import Path
-from typing import List, Dict, Tuple, Optional
+from typing import List, Dict, Tuple, Optional, Any
 from enum import Enum
 from datetime import datetime, timedelta
 from scenedetect import SceneManager, AdaptiveDetector, open_video
 #from scenedetect import detect, ContentDetector
 from apscheduler.schedulers.blocking import BlockingScheduler
-from apscheduler.jobstores.sqlalchemy import SQLAlchemyJobStore
 from apscheduler.executors.pool import ThreadPoolExecutor
-import psutil
 import os
-import tempfile
 import shutil
 from dotenv import load_dotenv
 from abc import ABC, abstractmethod
@@ -53,6 +48,17 @@ import re
 import concurrent.futures
 from PIL import Image
 from io import BytesIO
+
+
+PROCESSED_MARKER_TAGS = ["ai-generated", "auto-tagged", "vision-analyzed"]
+
+
+def normalize_tag_form(tag: str) -> str:
+    """Normalize a tag to a canonical form for comparison across modules."""
+    normalized = tag.lower().strip()
+    normalized = re.sub(r'[-_]+', ' ', normalized)
+    normalized = re.sub(r'\s+', ' ', normalized)
+    return normalized
 
 
 class TaskStatus(Enum):
@@ -320,7 +326,7 @@ class IntelligentFrameExtractor:
             if w * h > self.max_pixels:
                 ratio = (self.max_pixels / (w * h)) ** 0.5
                 new_w, new_h = int(w * ratio), int(h * ratio)
-                img = img.resize((new_w, new_h), Image.LANCZOS)
+                img = img.resize((new_w, new_h), Image.Resampling.LANCZOS)
                 self.logger.debug(f"Resized frame {filename} from {w}x{h} to {new_w}x{new_h}")
             
             # Convert back to bytes
@@ -447,7 +453,7 @@ class BaseVisionProcessor(ABC):
         self.tag_prompt = self._create_tagging_prompt()
         self.logger = logging.getLogger(__name__)
 
-    def _create_tagging_prompt(self, existing_tags: List[str] = None) -> str:
+    def _create_tagging_prompt(self, existing_tags: Optional[List[str]] = None) -> str:
         return """
         Analyze this video frame and generate descriptive tags for media organization.
         
@@ -521,7 +527,7 @@ class BaseVisionProcessor(ABC):
                 return existing_tag
         return None
 
-    def normalize_tags(self, tags: List[str], existing_tags: List[str] = None) -> List[str]:
+    def normalize_tags(self, tags: List[str], existing_tags: Optional[List[str]] = None) -> List[str]:
         """
         Normalize and deduplicate tags, preferring existing tag forms.
         Collapses similar tags like "action shot" and "action-shot" into one.
@@ -585,7 +591,7 @@ class BaseVisionProcessor(ABC):
         return list(set(all_tags))
 
     @abstractmethod
-    def analyze_frames_sync(self, frame_paths: List[str], existing_tags: List[str] = None) -> List[str]:
+    def analyze_frames_sync(self, frame_paths: List[str], existing_tags: Optional[List[str]] = None) -> List[str]:
         """Synchronous frame analysis for immediate processing"""
         pass
 
@@ -596,7 +602,7 @@ class BaseVisionProcessor(ABC):
         for i in range(0, len(tags), batch_size):
             batch = tags[i:i + batch_size]
             
-            prompt = f"""Analyze these media tags and identify pairs that are semantically identical 
+            prompt = f"""Analyze these media tags and identify pairs that are semantically identical
 or very similar and should be merged. Only suggest merges for tags that mean the same thing.
 
 Tags: {json.dumps(batch)}
@@ -606,8 +612,13 @@ Format: [{{"merge": "tag_to_remove", "into": "canonical_tag"}}]
 
 Only include clear duplicates. Examples of valid merges:
 - "close up" and "closeup" -> keep "close up"
-- "night time" and "nighttime" -> keep "nighttime"  
+- "night time" and "nighttime" -> keep "nighttime"
 - "b&w" and "black and white" -> keep "black and white"
+
+IMPORTANT: Do NOT suggest merging any system/marker tags such as
+"ai-generated", "auto-tagged", or "vision-analyzed" (or close variants of them
+like "ai generated", "ai_generated", "vision analyzed"). These are used as
+processing markers and must be preserved as-is. Skip them entirely.
 
 Return empty array [] if no clear duplicates found."""
 
@@ -656,7 +667,7 @@ class LMStudioVisionProcessor(BaseVisionProcessor):
                 parsed_tags = json.loads(json_content)
 
                 # Flatten all tag categories into a single list
-                frame_tags = []
+                frame_tags: List[str] = []
                 for category, tags in parsed_tags.items():
                     if isinstance(tags, list):
                         frame_tags.extend(tags)
@@ -673,7 +684,7 @@ class LMStudioVisionProcessor(BaseVisionProcessor):
         
         return []
 
-    def analyze_frames_sync(self, frame_paths: List[str], existing_tags: List[str] = None) -> List[str]:
+    def analyze_frames_sync(self, frame_paths: List[str], existing_tags: Optional[List[str]] = None) -> List[str]:
         """Synchronous frame analysis for immediate processing"""
         self.set_existing_tags(existing_tags or [])
         return self._process_frames_parallel(frame_paths, self._process_single_frame)
@@ -732,7 +743,7 @@ class OllamaVisionProcessor(BaseVisionProcessor):
                 parsed_tags = json.loads(json_content)
 
                 # Flatten all tag categories into a single list
-                frame_tags = []
+                frame_tags: List[str] = []
                 for category, tags in parsed_tags.items():
                     if isinstance(tags, list):
                         frame_tags.extend(tags)
@@ -751,7 +762,7 @@ class OllamaVisionProcessor(BaseVisionProcessor):
         
         return []
 
-    def analyze_frames_sync(self, frame_paths: List[str], existing_tags: List[str] = None) -> List[str]:
+    def analyze_frames_sync(self, frame_paths: List[str], existing_tags: Optional[List[str]] = None) -> List[str]:
         """Synchronous frame analysis for immediate processing using Ollama"""
         self.set_existing_tags(existing_tags or [])
         return self._process_frames_parallel(frame_paths, self._process_single_frame)
@@ -830,7 +841,7 @@ class APIVisionProcessor(BaseVisionProcessor):
                         f"API error for {frame_path}: Status {response.status_code}, "
                         f"Response: {error_data}"
                     )
-                except:
+                except ValueError:
                     self.logger.error(
                         f"API error for {frame_path}: Status {response.status_code}, "
                         f"Response: {response.text}"
@@ -847,7 +858,7 @@ class APIVisionProcessor(BaseVisionProcessor):
                 parsed_tags = json.loads(json_content)
 
                 # Flatten all tag categories into a single list
-                frame_tags = []
+                frame_tags: List[str] = []
                 for category, tags in parsed_tags.items():
                     if isinstance(tags, list):
                         frame_tags.extend(tags)
@@ -866,7 +877,7 @@ class APIVisionProcessor(BaseVisionProcessor):
         
         return []
 
-    def analyze_frames_sync(self, frame_paths: List[str], existing_tags: List[str] = None) -> List[str]:
+    def analyze_frames_sync(self, frame_paths: List[str], existing_tags: Optional[List[str]] = None) -> List[str]:
         """Synchronous frame analysis for immediate processing using Z.AI API"""
         self.set_existing_tags(existing_tags or [])
         return self._process_frames_parallel(frame_paths, self._process_single_frame)
@@ -966,7 +977,7 @@ class TagConsolidator:
         dry_run: bool = True, 
         use_llm: bool = False,
         interactive: bool = True
-    ) -> Dict[str, any]:
+    ) -> Dict[str, Any]:
         """
         Main consolidation function.
         
@@ -995,38 +1006,53 @@ class TagConsolidator:
         # Find rule-based duplicates (normalization)
         duplicate_groups = self.find_duplicate_groups(all_tags)
         stats["duplicate_groups"] = len(duplicate_groups)
-        
+
         self.logger.info(f"Found {len(duplicate_groups)} groups of duplicate tags")
-        
+
+        # Compute the set of normalized forms of protected marker tags so we never
+        # merge them away (doing so would cause already-processed videos to be
+        # re-processed on the next run).
+        protected_normalized = {self._normalize_tag(t) for t in PROCESSED_MARKER_TAGS}
+
         # Process each duplicate group
         for norm_form, variants in duplicate_groups.items():
+            # Skip any duplicate group whose normalized form matches a protected
+            # marker tag (e.g. ["ai-generated", "ai generated"]).
+            if norm_form in protected_normalized:
+                self.logger.info(
+                    f"Skipping protected marker tag group: {variants}"
+                )
+                print(f"\nDuplicate group: {variants}")
+                print("  -> Protected marker tag, will NOT merge.")
+                continue
+
             canonical = self.choose_canonical_tag(variants)
             tags_to_merge = [t for t in variants if t != canonical]
-            
+
             if not tags_to_merge:
                 continue
-                
+
             merge_info = {
                 "canonical": canonical,
                 "merged": tags_to_merge,
                 "videos_affected": 0
             }
-            
+
             print(f"\nDuplicate group: {variants}")
             print(f"  -> Canonical form: '{canonical}'")
             print(f"  -> Will merge: {tags_to_merge}")
-            
+
             if interactive and not dry_run:
                 confirm = input("  Proceed with merge? [y/N]: ").strip().lower()
                 if confirm != 'y':
                     print("  Skipped.")
                     continue
-            
+
             if not dry_run:
                 for old_tag in tags_to_merge:
                     videos = self.emby_client.get_videos_with_tag(old_tag)
                     self.logger.info(f"Found {len(videos)} videos with tag '{old_tag}'")
-                    
+
                     for video in videos:
                         success = self.emby_client.replace_tag_on_video(
                             video["Id"], old_tag, canonical
@@ -1034,40 +1060,53 @@ class TagConsolidator:
                         if success:
                             merge_info["videos_affected"] += 1
                             stats["videos_updated"] += 1
-                    
+
                     stats["tags_merged"] += 1
-            
+
             stats["merge_details"].append(merge_info)
         
         # Optional: LLM-based semantic duplicate detection
         if use_llm:
             self.logger.info("Running LLM-based semantic analysis...")
             # Get updated tag list (excluding already merged)
-            remaining_tags = [t for t in all_tags 
+            remaining_tags = [t for t in all_tags
                            if not any(t in d["merged"] for d in stats["merge_details"])]
-            
+
             semantic_merges = self.find_semantic_duplicates_llm(remaining_tags)
-            
+
             for old_tag, canonical in semantic_merges:
                 if old_tag not in remaining_tags or canonical not in remaining_tags:
                     continue
-                    
-                print(f"\nSemantic duplicate found:")
+
+                # Never merge away a protected marker tag (either as the source
+                # or as the target). Doing so would cause already-processed
+                # videos to be reprocessed on the next run.
+                if (self._normalize_tag(old_tag) in protected_normalized
+                        or self._normalize_tag(canonical) in protected_normalized):
+                    self.logger.info(
+                        f"Skipping protected marker tag merge: '{old_tag}' -> '{canonical}'"
+                    )
+                    print("\nSemantic duplicate found:")
+                    print(f"  '{old_tag}' -> '{canonical}'")
+                    print("  -> Protected marker tag, will NOT merge.")
+                    continue
+
+                print("\nSemantic duplicate found:")
                 print(f"  '{old_tag}' -> '{canonical}'")
-                
+
                 if interactive and not dry_run:
                     confirm = input("  Proceed with merge? [y/N]: ").strip().lower()
                     if confirm != 'y':
                         print("  Skipped.")
                         continue
-                
+
                 merge_info = {
                     "canonical": canonical,
                     "merged": [old_tag],
                     "videos_affected": 0,
                     "semantic": True
                 }
-                
+
                 if not dry_run:
                     videos = self.emby_client.get_videos_with_tag(old_tag)
                     self.logger.info(f"Found {len(videos)} videos with tag '{old_tag}'")
@@ -1079,7 +1118,7 @@ class TagConsolidator:
                             merge_info["videos_affected"] += 1
                             stats["videos_updated"] += 1
                     stats["tags_merged"] += 1
-                
+
                 stats["merge_details"].append(merge_info)
         
         return stats
@@ -1421,18 +1460,50 @@ class VideoTaggingAutomation:
             self.logger.error(f"Failed to copy favorite video {video_name}: {str(e)}")
             return False
 
-    def _should_process_video(self, video: Dict) -> bool:
+    def _get_completed_emby_ids(self) -> set:
+        """Return a set of all emby_ids currently marked COMPLETED in the task DB.
+
+        Used as a defense-in-depth check so that videos whose marker tag was
+        somehow lost are still skipped from reprocessing.
+        """
+        conn = sqlite3.connect(self.task_tracker)
+        try:
+            cursor = conn.execute(
+                "SELECT emby_id FROM video_tasks WHERE status = ?",
+                (TaskStatus.COMPLETED.value,),
+            )
+            return {row[0] for row in cursor.fetchall()}
+        except Exception as e:
+            self.logger.error(f"Failed to query completed tasks: {e}")
+            return set()
+        finally:
+            conn.close()
+
+    def _should_process_video(
+        self,
+        video: Dict,
+        completed_ids: Optional[set] = None,
+    ) -> bool:
         """Determine if video needs processing"""
-        # Check if already processed
+        # Check if already processed via marker tag. Compare normalized forms
+        # so that variants like "ai generated" / "ai_generated" / "ai-generated"
+        # all still count as processed.
         existing_tags = [x["Name"] for x in video.get("TagItems", [])]
-        ai_tag_indicators = ["ai-generated", "auto-tagged", "vision-analyzed"]
-        if any(
-            indicator in tag.lower()
-            for tag in existing_tags
-            for indicator in ai_tag_indicators
-        ):
+        normalized_markers = {normalize_tag_form(t) for t in PROCESSED_MARKER_TAGS}
+        normalized_video_tags = {normalize_tag_form(t) for t in existing_tags}
+        if normalized_markers & normalized_video_tags:
             self.logger.info(
-                f"Skipping {video.get('Name', 'Unknown')} - already processed"
+                f"Skipping {video.get('Name', 'Unknown')} - already processed (marker tag)"
+            )
+            return False
+
+        # Defense-in-depth: also check the task DB. If this video was previously
+        # marked completed (e.g. after the marker tag was removed by some other
+        # process), skip it. The manual command bypasses this check entirely
+        # (it never calls this method) and resets the DB row on entry.
+        if completed_ids is not None and video.get("Id") in completed_ids:
+            self.logger.info(
+                f"Skipping {video.get('Name', 'Unknown')} - already completed in task DB"
             )
             return False
 
@@ -1637,10 +1708,20 @@ class VideoTaggingAutomation:
                 video_name = video.get("Name", "Unknown")
                 self._copy_favorite_video(video_path, video_name)
 
+        # Batch-fetch IDs of previously completed videos so we can skip them
+        # even if their marker tag is missing. This is a defense-in-depth
+        # cross-check; the primary check is still the marker tag in the video
+        # record itself.
+        completed_ids = self._get_completed_emby_ids()
+        if completed_ids:
+            self.logger.info(
+                f"Loaded {len(completed_ids)} previously completed video IDs from task DB"
+            )
+
         videos_to_process = [
             (video, source_type)
             for video, source_type in all_videos
-            if self._should_process_video(video)
+            if self._should_process_video(video, completed_ids)
         ]
 
         self.logger.info(f"Found {len(videos_to_process)} videos needing frame extraction.")

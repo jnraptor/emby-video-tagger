@@ -57,6 +57,22 @@ python emby_video_tagger.py manual <video_id>
 tail -f video_tagging.log
 ```
 
+### Linting and Type Checking
+The project uses `ruff` (linter) and `ty` (type checker) as the LSP toolchain. Both are installed system-wide at `~/.local/bin/`. Both must report zero errors before committing.
+
+```bash
+ruff check emby_video_tagger.py
+ty check emby_video_tagger.py
+```
+
+Key conventions enforced:
+- No unused imports (ruff F401)
+- No bare `except:` — use `except ValueError:` (ruff E722)
+- No f-strings without placeholders (ruff F541)
+- Optional defaults must be explicit: `Optional[List[str]] = None`, not `List[str] = None` (ty)
+- Pillow 10+ requires `Image.Resampling.LANCZOS`, not `Image.LANCZOS` (ty)
+- Typing `Any` is uppercase: `Dict[str, Any]`, not `Dict[str, any]` (ty)
+
 ## Architecture Overview
 
 This is an automated video tagging system for Emby media servers that uses AI vision analysis to generate intelligent tags. The system operates using a **two-pass architecture**:
