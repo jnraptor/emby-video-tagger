@@ -12,7 +12,7 @@
 #    modal deploy llama-serve-modal.py
 #
 # 3. To stop the deployment, use:
-#    modal app stop llama-cpp-server
+#    modal app stop -y llama-cpp-server
 #
 # After running, Modal will provide a public URL. You can use this URL with any
 # OpenAI-compatible client library or tools like `curl` to interact with the model.
