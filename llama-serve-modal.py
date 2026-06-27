@@ -19,16 +19,15 @@
 # The server exposes standard endpoints like `/v1/chat/completions`.
 
 import subprocess
-from pathlib import Path
 
 import modal
 
 # --- Variables ---
-FILENAME = "Qwen3-VL-8B-NSFW-Caption-V4.5.Q8_0.gguf"
-MPROJ_FILENAME = "Qwen3-VL-8B-NSFW-Caption-V4.5.mmproj-Q8_0.gguf"
-#FILENAME = "Qwen3.5-9B-Claude-4.6-HighIQ-INSTRUCT-HERETIC-UNCENSORED.Q8_0.gguf"
-#MPROJ_FILENAME = "Qwen3.5-9B-Claude-4.6-HighIQ-INSTRUCT-HERETIC-UNCENSORED.mmproj-Q8_0.gguf"
-#CHAT_TEMPLATE_FILE = "chat_template-instruct.jinja"
+#FILENAME = "Qwen3-VL-8B-NSFW-Caption-V4.5.Q8_0.gguf"
+#MPROJ_FILENAME = "Qwen3-VL-8B-NSFW-Caption-V4.5.mmproj-Q8_0.gguf"
+FILENAME = "qwen3.5-9b-nsfw-captioning-v5.Q8_0.gguf"
+MPROJ_FILENAME = "qwen3.5-9b-nsfw-captioning-v5.mmproj-Q8_0.gguf"
+# CHAT_TEMPLATE_FILE = "chat_template-instruct.jinja"
 ALIAS = "InternVL3_5-1B"
 N_GPU_LAYERS = "99"
 CTX_SIZE = "24576"  # 8192*3
@@ -48,14 +47,20 @@ llama_image = (
     # modal.Image.from_registry("ghcr.io/ggml-org/llama.cpp:server-cuda", add_python="3.11")
     modal.Image.from_registry(f"nvidia/cuda:{TAG}", add_python="3.12")
     .apt_install(
-        "git", "build-essential", "cmake", "curl", "libcurl4-openssl-dev", "libssl-dev", "ccache"
+        "git",
+        "build-essential",
+        "cmake",
+        "curl",
+        "libcurl4-openssl-dev",
+        "libssl-dev",
+        "ccache",
     )
     .run_commands(
         "apt dist-upgrade -y",
         force_build=False,
     )
     .run_commands(
-        "git clone --depth 1 --branch b9758 https://github.com/ggml-org/llama.cpp",
+        "git clone --depth 1 --branch b9821 https://github.com/ggml-org/llama.cpp",
         force_build=False,
     )
     .run_commands("lscpu")
@@ -74,13 +79,13 @@ llama_image = (
         {
             "LLAMA_ARG_MODEL": f"{MODEL_DIR}/{FILENAME}",
             "LLAMA_ARG_MMPROJ": f"{MODEL_DIR}/{MPROJ_FILENAME}",
-            #"LLAMA_ARG_CHAT_TEMPLATE_FILE": f"{MODEL_DIR}/{CHAT_TEMPLATE_FILE}",
+            # "LLAMA_ARG_CHAT_TEMPLATE_FILE": f"{MODEL_DIR}/{CHAT_TEMPLATE_FILE}",
             "LLAMA_ARG_ALIAS": ALIAS,
             "LLAMA_ARG_CTX_SIZE": CTX_SIZE,
             "LLAMA_ARG_BATCH": BATCH,
             "LLAMA_ARG_UBATCH": UBATCH,
             "LLAMA_ARG_N_GPU_LAYERS": N_GPU_LAYERS,
-            "LLAMA_ARG_N_PARALLEL": PARALLEL
+            "LLAMA_ARG_N_PARALLEL": PARALLEL,
         }
     )
 )
@@ -90,19 +95,22 @@ app = modal.App("llama-cpp-server")
 @app.function(
     image=llama_image,
     gpu=GPU,
-    cpu=8.0, #default is 0.125
+    cpu=8.0,  # default is 0.125
     volumes={MODEL_DIR: model_volume},
     timeout=60 * 5,  # 5 minutes max input runtime
     scaledown_window=300,  # Timeout after 5 minutes of inactivity.
     min_containers=1,  # Keep at least one container running for fast startup
-    secrets=[modal.Secret.from_name("LLAMA_API_KEY")], #load LLAMA_API_KEY from secrets
+    secrets=[
+        modal.Secret.from_name("LLAMA_API_KEY")
+    ],  # load LLAMA_API_KEY from secrets
 )
 @modal.concurrent(max_inputs=3)
 @modal.web_server(port=8080, startup_timeout=180)
 def serve():
-    import subprocess
 
-    cmd = ["/llama.cpp/llama-server --port 8080 --host 0.0.0.0 --fit on --jinja"]
+    cmd = [
+        "/llama.cpp/llama-server --port 8080 --host 0.0.0.0 --fit on --jinja --chat-template-kwargs '{\"enable_thinking\": false}'"
+    ]
     print(cmd)
     subprocess.Popen(" ".join(cmd), shell=True)
     print("Serving llama.cpp API on port 8080")

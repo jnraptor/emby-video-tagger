@@ -7,15 +7,14 @@
 
 import modal
 from pathlib import Path
-import subprocess
 
 # --- Variables ---
-#REPO_ID = "mradermacher/Qwen3-VL-8B-NSFW-Caption-V4.5-GGUF"
-#FILENAME = "Qwen3-VL-8B-NSFW-Caption-V4.5.Q8_0.gguf"
-#MPROJ_FILENAME = "Qwen3-VL-8B-NSFW-Caption-V4.5.mmproj-Q8_0.gguf"
-REPO_ID = "mradermacher/Qwen3.5-9B-Claude-4.6-HighIQ-INSTRUCT-HERETIC-UNCENSORED-GGUF"
-FILENAME = "Qwen3.5-9B-Claude-4.6-HighIQ-INSTRUCT-HERETIC-UNCENSORED.Q8_0.gguf"
-MPROJ_FILENAME = "Qwen3.5-9B-Claude-4.6-HighIQ-INSTRUCT-HERETIC-UNCENSORED.mmproj-Q8_0.gguf"
+# REPO_ID = "mradermacher/Qwen3-VL-8B-NSFW-Caption-V4.5-GGUF"
+# FILENAME = "Qwen3-VL-8B-NSFW-Caption-V4.5.Q8_0.gguf"
+# MPROJ_FILENAME = "Qwen3-VL-8B-NSFW-Caption-V4.5.mmproj-Q8_0.gguf"
+REPO_ID = "mradermacher/qwen3.5-9b-nsfw-captioning-v5-GGUF"
+FILENAME = "qwen3.5-9b-nsfw-captioning-v5.Q8_0.gguf"
+MPROJ_FILENAME = "qwen3.5-9b-nsfw-captioning-v5.mmproj-Q8_0.gguf"
 
 # --- Configuration ---
 # Define the base Docker image from ghcr.io, a persistent volume for models,
@@ -29,12 +28,11 @@ download_image = (
 )
 app = modal.App("llama-cpp-downloader")
 
-@app.function(
-    image=download_image, volumes={MODEL_DIR: model_volume}, timeout=60 * 5
-)
+
+@app.function(image=download_image, volumes={MODEL_DIR: model_volume}, timeout=60 * 5)
 def download_model(repo_id: str, filename: str, mproj_filename: str = None):
     from huggingface_hub import hf_hub_download
-    
+
     """
     Downloads the specified GGUF model and (if provided) a multimodal projector
     file from Hugging Face Hub to the persistent volume. This function is
@@ -46,13 +44,13 @@ def download_model(repo_id: str, filename: str, mproj_filename: str = None):
         print(f"Downloading model: {repo_id}/{filename}...")
         hf_hub_download(
             repo_id=repo_id,
-            #subfolder="GGUF",
+            # subfolder="GGUF",
             filename=filename,
-            local_dir=MODEL_DIR
+            local_dir=MODEL_DIR,
         )
         model_volume.commit()
         print("Model download complete.")
-    
+
     # Download the multimodal projector file (for vision models like InternVL)
     if mproj_filename:
         mproj_path = Path(MODEL_DIR) / mproj_filename
@@ -60,12 +58,13 @@ def download_model(repo_id: str, filename: str, mproj_filename: str = None):
             print(f"Downloading mmproj: {repo_id}/{mproj_filename}...")
             hf_hub_download(
                 repo_id=repo_id,
-                #subfolder="GGUF",
+                # subfolder="GGUF",
                 filename=mproj_filename,
-                local_dir=MODEL_DIR
+                local_dir=MODEL_DIR,
             )
             model_volume.commit()
             print("Mmproj download complete.")
+
 
 @app.local_entrypoint()
 def main():
