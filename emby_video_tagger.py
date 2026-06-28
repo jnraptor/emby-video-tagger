@@ -37,7 +37,8 @@ from typing import List, Dict, Tuple, Optional, Any
 from enum import Enum
 from datetime import datetime, timedelta
 from scenedetect import SceneManager, AdaptiveDetector, open_video
-#from scenedetect import detect, ContentDetector
+
+# from scenedetect import detect, ContentDetector
 from apscheduler.schedulers.blocking import BlockingScheduler
 from apscheduler.executors.pool import ThreadPoolExecutor
 import os
@@ -56,8 +57,8 @@ PROCESSED_MARKER_TAGS = ["ai-generated", "auto-tagged", "vision-analyzed"]
 def normalize_tag_form(tag: str) -> str:
     """Normalize a tag to a canonical form for comparison across modules."""
     normalized = tag.lower().strip()
-    normalized = re.sub(r'[-_]+', ' ', normalized)
-    normalized = re.sub(r'\s+', ' ', normalized)
+    normalized = re.sub(r"[-_]+", " ", normalized)
+    normalized = re.sub(r"\s+", " ", normalized)
     return normalized
 
 
@@ -79,20 +80,22 @@ class EmbyVideoTagger:
         """
         try:
             # Replace Z with +00:00 for proper timezone handling
-            date_str = date_string.replace('Z', '+00:00')
-            
+            date_str = date_string.replace("Z", "+00:00")
+
             # Handle microseconds with more than 6 decimal places
             # Pattern: YYYY-MM-DDTHH:MM:SS.NNNNNNN+TZ or YYYY-MM-DDTHH:MM:SS.NNNNNNN-TZ
-            pattern = r'(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})\.(\d+)([\+\-]\d{2}:\d{2})$'
+            pattern = (
+                r"(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})\.(\d+)([\+\-]\d{2}:\d{2})$"
+            )
             match = re.match(pattern, date_str)
-            
+
             if match:
                 date_part, microseconds, timezone_part = match.groups()
                 # Truncate microseconds to 6 digits if longer
                 if len(microseconds) > 6:
                     microseconds = microseconds[:6]
                 date_str = f"{date_part}.{microseconds}{timezone_part}"
-            
+
             return datetime.fromisoformat(date_str)
         except ValueError as e:
             self.logger.error(f"Failed to parse datetime '{date_string}': {e}")
@@ -164,7 +167,7 @@ class EmbyVideoTagger:
             response = self.session.get(url, params=params, timeout=30)
             response.raise_for_status()
             items = response.json().get("Items", [])
-            
+
             self.logger.info(f"Retrieved {len(items)} favorite videos from Emby")
             return items
 
@@ -199,7 +202,7 @@ class EmbyVideoTagger:
     def get_all_tags(self) -> List[str]:
         """Retrieve all existing tags from the Emby library"""
         url = f"{self.base_url}/emby/Tags"
-        
+
         try:
             response = self.session.get(url, timeout=30)
             response.raise_for_status()
@@ -221,7 +224,7 @@ class EmbyVideoTagger:
             "Fields": "Tags,TagItems",
             "Limit": 10000,
         }
-        
+
         try:
             response = self.session.get(url, params=params, timeout=60)
             response.raise_for_status()
@@ -234,25 +237,28 @@ class EmbyVideoTagger:
     def replace_tag_on_video(self, item_id: str, old_tag: str, new_tag: str) -> bool:
         """Replace a specific tag with another on a video"""
         url = f"{self.base_url}/emby/Items?Ids={item_id}&Fields=Path,Tags,TagItems,ProviderIds"
-        
+
         try:
             response = self.session.get(url)
             response.raise_for_status()
             video = response.json()
             item = video["Items"][0]
-            
+
             # Get current tags
-            current_tags = [x["Name"] if isinstance(x, dict) else x for x in item.get("TagItems", [])]
-            
+            current_tags = [
+                x["Name"] if isinstance(x, dict) else x
+                for x in item.get("TagItems", [])
+            ]
+
             # Replace old tag with new tag
             if old_tag in current_tags:
                 current_tags.remove(old_tag)
                 if new_tag not in current_tags:
                     current_tags.append(new_tag)
-                
+
                 item["Tags"] = current_tags
                 item["TagItems"] = current_tags
-                
+
                 update_url = f"{self.base_url}/emby/Items/{item_id}"
                 time.sleep(0.05)  # Rate limiting
                 response = self.session.post(update_url, json=item, timeout=30)
@@ -267,7 +273,9 @@ class EmbyVideoTagger:
 class IntelligentFrameExtractor:
     """Extracts representative frames from videos using scene detection"""
 
-    def __init__(self, scene_threshold: float = 5.0, max_pixels: int = 800 * 800): # default 27 for ContentDetector, 3 for AdaptiveDetector
+    def __init__(
+        self, scene_threshold: float = 5.0, max_pixels: int = 800 * 800
+    ):  # default 27 for ContentDetector, 3 for AdaptiveDetector
         self.scene_threshold = scene_threshold
         self.max_pixels = max_pixels
         self.logger = logging.getLogger(__name__)
@@ -290,7 +298,9 @@ class IntelligentFrameExtractor:
 
             # 2. Create a SceneManager and add the detector
             scene_manager = SceneManager()
-            scene_manager.add_detector(AdaptiveDetector(adaptive_threshold=self.scene_threshold))
+            scene_manager.add_detector(
+                AdaptiveDetector(adaptive_threshold=self.scene_threshold)
+            )
 
             # 3. Perform scene detection with downscaling for speed
             scene_manager.auto_downscale = True
@@ -306,7 +316,9 @@ class IntelligentFrameExtractor:
                 return self._fallback_extraction(video_path, output_path, max_frames)
 
             self.logger.info(f"Detected {len(scene_list)} scenes in {video_path}")
-            return self._extract_scene_frames(video_path, scene_list, output_path, max_frames)
+            return self._extract_scene_frames(
+                video_path, scene_list, output_path, max_frames
+            )
 
         except Exception as e:
             self.logger.error(f"Scene detection failed for {video_path}: {e}")
@@ -317,23 +329,25 @@ class IntelligentFrameExtractor:
         try:
             # Convert bytes to PIL Image
             img = Image.open(BytesIO(frame))
-            
+
             # Check if resizing is needed
             if img.mode != "RGB":
                 img = img.convert("RGB")
-            
+
             w, h = img.size
             if w * h > self.max_pixels:
                 ratio = (self.max_pixels / (w * h)) ** 0.5
                 new_w, new_h = int(w * ratio), int(h * ratio)
                 img = img.resize((new_w, new_h), Image.Resampling.LANCZOS)
-                self.logger.debug(f"Resized frame {filename} from {w}x{h} to {new_w}x{new_h}")
-            
+                self.logger.debug(
+                    f"Resized frame {filename} from {w}x{h} to {new_w}x{new_h}"
+                )
+
             # Convert back to bytes
             buffer = BytesIO()
             img.save(buffer, format="JPEG", quality=85)
             return buffer.getvalue()
-            
+
         except Exception as e:
             self.logger.warning(f"Failed to resize frame {filename}: {e}")
             return frame  # Return original frame if resizing fails
@@ -380,17 +394,21 @@ class IntelligentFrameExtractor:
                     filename = str(
                         output_dir / f"scene_{i:03d}_frame_{middle_frame:06d}.jpg"
                     )
-                    
+
                     # First encode to bytes
-                    success, encoded_img = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
+                    success, encoded_img = cv2.imencode(
+                        ".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 85]
+                    )
                     if success:
                         # Resize if needed
-                        resized_frame = self._resize_frame_if_needed(encoded_img.tobytes(), filename)
-                        
+                        resized_frame = self._resize_frame_if_needed(
+                            encoded_img.tobytes(), filename
+                        )
+
                         # Write the (potentially resized) frame
-                        with open(filename, 'wb') as f:
+                        with open(filename, "wb") as f:
                             f.write(resized_frame)
-                    
+
                     extracted_frames.append((filename, middle_frame))
 
             except Exception as e:
@@ -426,17 +444,21 @@ class IntelligentFrameExtractor:
 
             if ret:
                 filename = str(output_dir / f"uniform_frame_{i:06d}.jpg")
-                
+
                 # First encode to bytes
-                success, encoded_img = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
+                success, encoded_img = cv2.imencode(
+                    ".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 85]
+                )
                 if success:
                     # Resize if needed
-                    resized_frame = self._resize_frame_if_needed(encoded_img.tobytes(), filename)
-                    
+                    resized_frame = self._resize_frame_if_needed(
+                        encoded_img.tobytes(), filename
+                    )
+
                     # Write the (potentially resized) frame
-                    with open(filename, 'wb') as f:
+                    with open(filename, "wb") as f:
                         f.write(resized_frame)
-                
+
                 extracted_frames.append((filename, i))
 
         cap.release()
@@ -513,21 +535,25 @@ class BaseVisionProcessor(ABC):
         """Normalize a tag to a canonical form for comparison"""
         # Convert to lowercase and replace common separators with spaces
         normalized = tag.lower().strip()
-        normalized = re.sub(r'[-_]+', ' ', normalized)
+        normalized = re.sub(r"[-_]+", " ", normalized)
         # Remove extra whitespace
-        normalized = re.sub(r'\s+', ' ', normalized)
+        normalized = re.sub(r"\s+", " ", normalized)
         return normalized
 
-    def _find_matching_existing_tag(self, new_tag: str, existing_tags: List[str]) -> Optional[str]:
+    def _find_matching_existing_tag(
+        self, new_tag: str, existing_tags: List[str]
+    ) -> Optional[str]:
         """Find an existing tag that matches the new tag (accounting for variations)"""
         new_normalized = self._normalize_tag(new_tag)
-        
+
         for existing_tag in existing_tags:
             if self._normalize_tag(existing_tag) == new_normalized:
                 return existing_tag
         return None
 
-    def normalize_tags(self, tags: List[str], existing_tags: Optional[List[str]] = None) -> List[str]:
+    def normalize_tags(
+        self, tags: List[str], existing_tags: Optional[List[str]] = None
+    ) -> List[str]:
         """
         Normalize and deduplicate tags, preferring existing tag forms.
         Collapses similar tags like "action shot" and "action-shot" into one.
@@ -535,20 +561,20 @@ class BaseVisionProcessor(ABC):
         """
         if existing_tags is None:
             existing_tags = self.existing_tags or []
-        
+
         normalized_map = {}  # normalized_form -> preferred_tag
         result = []
-        
+
         # First, add all existing tags to the map (they take priority)
         for tag in existing_tags:
             norm = self._normalize_tag(tag)
             if norm not in normalized_map:
                 normalized_map[norm] = tag
-        
+
         # Process new tags
         for tag in tags:
             norm = self._normalize_tag(tag)
-            
+
             if norm in normalized_map:
                 # Use the existing/preferred form
                 preferred = normalized_map[norm]
@@ -560,13 +586,15 @@ class BaseVisionProcessor(ABC):
                 normalized_map[norm] = canonical
                 if canonical not in result:
                     result.append(canonical)
-        
+
         return result
 
-    def _process_frames_parallel(self, frame_paths: List[str], process_func) -> List[str]:
+    def _process_frames_parallel(
+        self, frame_paths: List[str], process_func
+    ) -> List[str]:
         """Process frames in parallel using ThreadPoolExecutor"""
         all_tags = []
-        
+
         if self.max_concurrent_requests <= 1 or len(frame_paths) <= 1:
             # Sequential processing for single frame or disabled parallel processing
             for frame_path in frame_paths:
@@ -574,10 +602,15 @@ class BaseVisionProcessor(ABC):
                 all_tags.extend(tags)
         else:
             # Parallel processing
-            with concurrent.futures.ThreadPoolExecutor(max_workers=self.max_concurrent_requests) as executor:
+            with concurrent.futures.ThreadPoolExecutor(
+                max_workers=self.max_concurrent_requests
+            ) as executor:
                 # Submit all tasks
-                future_to_frame = {executor.submit(process_func, frame_path): frame_path for frame_path in frame_paths}
-                
+                future_to_frame = {
+                    executor.submit(process_func, frame_path): frame_path
+                    for frame_path in frame_paths
+                }
+
                 # Collect results as they complete
                 for future in concurrent.futures.as_completed(future_to_frame):
                     frame_path = future_to_frame[future]
@@ -586,22 +619,73 @@ class BaseVisionProcessor(ABC):
                         all_tags.extend(tags)
                     except Exception as e:
                         self.logger.error(f"Failed to process frame {frame_path}: {e}")
-        
+
         # Remove duplicates and return unique tags
         return list(set(all_tags))
 
     @abstractmethod
-    def analyze_frames_sync(self, frame_paths: List[str], existing_tags: Optional[List[str]] = None) -> List[str]:
+    def analyze_frames_sync(
+        self, frame_paths: List[str], existing_tags: Optional[List[str]] = None
+    ) -> List[str]:
         """Synchronous frame analysis for immediate processing"""
         pass
 
-    def analyze_tags_for_consolidation(self, tags: List[str], batch_size: int = 100) -> List[Tuple[str, str]]:
+    def wait_until_ready(
+        self, timeout_seconds: int = 300, poll_interval_seconds: float = 5.0
+    ) -> bool:
+        """
+        Block until the vision API is ready to accept requests.
+
+        Self-hosted inference servers often return HTTP 503 (model loading or
+        server cold-start) for the first request after startup. This method
+        polls a lightweight readiness check on a loop and only returns once
+        the API reports success or `timeout_seconds` has elapsed.
+
+        Subclasses MUST override `_is_api_ready` to perform a provider-specific
+        probe (e.g. a cheap text or vision call). Subclasses MAY override this
+        method to customise polling behaviour.
+
+        Returns True if the API became ready within the timeout, False otherwise.
+        """
+        start = time.monotonic()
+        attempt = 0
+        while True:
+            attempt += 1
+            try:
+                if self._is_api_ready():
+                    elapsed = time.monotonic() - start
+                    self.logger.info(
+                        f"Vision API ready after {elapsed:.1f}s ({attempt} probe(s))"
+                    )
+                    return True
+            except Exception as e:
+                self.logger.debug(f"Readiness probe raised (will retry): {e}")
+
+            if time.monotonic() - start >= timeout_seconds:
+                self.logger.error(
+                    f"Vision API did not become ready within {timeout_seconds}s"
+                )
+                return False
+
+            self.logger.info(
+                f"Vision API not ready yet, sleeping {poll_interval_seconds}s before retry..."
+            )
+            time.sleep(poll_interval_seconds)
+
+    @abstractmethod
+    def _is_api_ready(self) -> bool:
+        """Provider-specific readiness probe. Return True if the API can serve a request."""
+        pass
+
+    def analyze_tags_for_consolidation(
+        self, tags: List[str], batch_size: int = 100
+    ) -> List[Tuple[str, str]]:
         """Use LLM to find semantically similar tags that should be merged"""
         merge_suggestions = []
-        
+
         for i in range(0, len(tags), batch_size):
-            batch = tags[i:i + batch_size]
-            
+            batch = tags[i : i + batch_size]
+
             prompt = f"""Analyze these media tags and identify pairs that are semantically identical
 or very similar and should be merged. Only suggest merges for tags that mean the same thing.
 
@@ -625,7 +709,7 @@ Return empty array [] if no clear duplicates found."""
             try:
                 result = self._send_text_prompt(prompt)
                 if result:
-                    json_match = re.search(r'\[.*\]', result, re.DOTALL)
+                    json_match = re.search(r"\[.*\]", result, re.DOTALL)
                     if json_match:
                         suggestions = json.loads(json_match.group())
                         for s in suggestions:
@@ -634,18 +718,24 @@ Return empty array [] if no clear duplicates found."""
             except Exception as e:
                 self.logger.error(f"LLM tag analysis failed for batch {i}: {e}")
                 continue
-                
+
         return merge_suggestions
 
     def _send_text_prompt(self, prompt: str) -> Optional[str]:
         """Send a text-only prompt to the LLM. Override in subclasses."""
-        raise NotImplementedError("Subclass must implement _send_text_prompt for text analysis")
+        raise NotImplementedError(
+            "Subclass must implement _send_text_prompt for text analysis"
+        )
 
 
 class LMStudioVisionProcessor(BaseVisionProcessor):
     """Handles LMStudio Vision API interactions for video frame analysis"""
 
-    def __init__(self, model_name: str = "qwen2.5-vl-7b-instruct-abliterated", max_concurrent_requests: int = 2):
+    def __init__(
+        self,
+        model_name: str = "qwen2.5-vl-7b-instruct-abliterated",
+        max_concurrent_requests: int = 2,
+    ):
         super().__init__(model_name, max_concurrent_requests)
 
     def _process_single_frame(self, frame_path: str) -> List[str]:
@@ -681,10 +771,12 @@ class LMStudioVisionProcessor(BaseVisionProcessor):
 
         except Exception as e:
             self.logger.error(f"Failed to analyze frame {frame_path}: {e}")
-        
+
         return []
 
-    def analyze_frames_sync(self, frame_paths: List[str], existing_tags: Optional[List[str]] = None) -> List[str]:
+    def analyze_frames_sync(
+        self, frame_paths: List[str], existing_tags: Optional[List[str]] = None
+    ) -> List[str]:
         """Synchronous frame analysis for immediate processing"""
         self.set_existing_tags(existing_tags or [])
         return self._process_frames_parallel(frame_paths, self._process_single_frame)
@@ -702,12 +794,26 @@ class LMStudioVisionProcessor(BaseVisionProcessor):
             self.logger.error(f"LMStudio text prompt failed: {e}")
             return None
 
+    def _is_api_ready(self) -> bool:
+        """Probe LMStudio with a tiny text prompt. Treat 503 / model-loading errors as 'not ready'."""
+        try:
+            result = self._send_text_prompt("ping")
+            return result is not None and len(result.strip()) > 0
+        except Exception as e:
+            error_str = str(e).lower()
+            if "503" in error_str or "loading" in error_str or "not ready" in error_str:
+                return False
+            raise
+
 
 class OllamaVisionProcessor(BaseVisionProcessor):
     """Handles Ollama Vision API interactions for video frame analysis"""
 
     def __init__(
-        self, model_name: str = "llava", base_url: str = "http://localhost:11434", max_concurrent_requests: int = 1
+        self,
+        model_name: str = "llava",
+        base_url: str = "http://localhost:11434",
+        max_concurrent_requests: int = 1,
     ):
         super().__init__(model_name, max_concurrent_requests)
         # self.base_url = base_url
@@ -756,13 +862,13 @@ class OllamaVisionProcessor(BaseVisionProcessor):
                 self.logger.debug(f"JSON decode error: {e}")
 
         except Exception as e:
-            self.logger.error(
-                f"Failed to analyze frame {frame_path} with Ollama: {e}"
-            )
-        
+            self.logger.error(f"Failed to analyze frame {frame_path} with Ollama: {e}")
+
         return []
 
-    def analyze_frames_sync(self, frame_paths: List[str], existing_tags: Optional[List[str]] = None) -> List[str]:
+    def analyze_frames_sync(
+        self, frame_paths: List[str], existing_tags: Optional[List[str]] = None
+    ) -> List[str]:
         """Synchronous frame analysis for immediate processing using Ollama"""
         self.set_existing_tags(existing_tags or [])
         return self._process_frames_parallel(frame_paths, self._process_single_frame)
@@ -780,12 +886,27 @@ class OllamaVisionProcessor(BaseVisionProcessor):
             self.logger.error(f"Ollama text prompt failed: {e}")
             return None
 
+    def _is_api_ready(self) -> bool:
+        """Probe Ollama. First call after startup may 503 while the model loads."""
+        try:
+            result = self._send_text_prompt("ping")
+            return result is not None and len(result.strip()) > 0
+        except Exception as e:
+            error_str = str(e).lower()
+            if "503" in error_str or "loading" in error_str or "not ready" in error_str:
+                return False
+            raise
+
 
 class APIVisionProcessor(BaseVisionProcessor):
     """Handles Z.AI API interactions for video frame analysis"""
 
     def __init__(
-        self, model_name: str = "glm-4.5v", base_url: str = "https://api.z.ai/api/paas/v4/chat/completions", auth_token: str = "", max_concurrent_requests: int = 3
+        self,
+        model_name: str = "glm-4.5v",
+        base_url: str = "https://api.z.ai/api/paas/v4/chat/completions",
+        auth_token: str = "",
+        max_concurrent_requests: int = 3,
     ):
         super().__init__(model_name, max_concurrent_requests)
         self.base_url = base_url
@@ -793,7 +914,7 @@ class APIVisionProcessor(BaseVisionProcessor):
         self.headers = {
             "Authorization": f"Bearer {auth_token}",
             "Accept-Language": "en-US,en",
-            "Content-Type": "application/json"
+            "Content-Type": "application/json",
         }
 
     def _process_single_frame(self, frame_path: str) -> List[str]:
@@ -815,24 +936,20 @@ class APIVisionProcessor(BaseVisionProcessor):
                                 "type": "image_url",
                                 "image_url": {
                                     "url": f"data:image/jpeg;base64,{image_data}"
-                                }
+                                },
                             },
-                            {
-                                "type": "text",
-                                "text": self.tag_prompt
-                            }
-                        ]
+                            {"type": "text", "text": self.tag_prompt},
+                        ],
                     }
                 ],
-                "thinking": {
-                    "type": "enabled"
-                }
+                "thinking": {"type": "enabled"},
             }
 
             # Make API request
             import requests
+
             response = requests.post(self.base_url, headers=self.headers, json=payload)
-            
+
             # Check for error response
             if response.status_code != 200:
                 try:
@@ -847,7 +964,7 @@ class APIVisionProcessor(BaseVisionProcessor):
                         f"Response: {response.text}"
                     )
                 return []
-            
+
             # Parse response
             response_data = response.json()
             analysis = response_data["choices"][0]["message"]["content"]
@@ -874,10 +991,12 @@ class APIVisionProcessor(BaseVisionProcessor):
             self.logger.error(
                 f"Failed to analyze frame {frame_path} with Z.AI API: {e}"
             )
-        
+
         return []
 
-    def analyze_frames_sync(self, frame_paths: List[str], existing_tags: Optional[List[str]] = None) -> List[str]:
+    def analyze_frames_sync(
+        self, frame_paths: List[str], existing_tags: Optional[List[str]] = None
+    ) -> List[str]:
         """Synchronous frame analysis for immediate processing using Z.AI API"""
         self.set_existing_tags(existing_tags or [])
         return self._process_frames_parallel(frame_paths, self._process_single_frame)
@@ -899,6 +1018,24 @@ class APIVisionProcessor(BaseVisionProcessor):
             self.logger.error(f"API text prompt failed: {e}")
             return None
 
+    def _is_api_ready(self) -> bool:
+        """Probe the OpenAI-compatible API by hitting /models. 503 = not ready, 200 = ready."""
+        try:
+            models_url = self.base_url.rsplit("/", 1)[0] + "/models"
+            response = requests.get(models_url, headers=self.headers, timeout=10)
+            if response.status_code == 200:
+                return True
+            if response.status_code in (503, 502, 504, 429):
+                return False
+            # Any other status: treat as a hard error so wait_until_ready re-raises
+            response.raise_for_status()
+            return True
+        except requests.exceptions.RequestException as e:
+            error_str = str(e).lower()
+            if "503" in error_str or "loading" in error_str:
+                return False
+            raise
+
 
 class VisionProcessorFactory:
     """Factory class for creating vision processor instances"""
@@ -917,12 +1054,16 @@ class VisionProcessorFactory:
             return OllamaVisionProcessor(model_name, base_url, max_concurrent_requests)
         elif provider.lower() == "api":
             model_name = config.get("model_name", "glm-4.5v")
-            base_url = config.get("base_url", "https://api.z.ai/api/paas/v4/chat/completions")
+            base_url = config.get(
+                "base_url", "https://api.z.ai/api/paas/v4/chat/completions"
+            )
             auth_token = config.get("auth_token")
             max_concurrent_requests = config.get("max_concurrent_requests", 3)
             if not auth_token:
                 raise ValueError("auth_token is required for API provider")
-            return APIVisionProcessor(model_name, base_url, auth_token, max_concurrent_requests)
+            return APIVisionProcessor(
+                model_name, base_url, auth_token, max_concurrent_requests
+            )
         else:
             raise ValueError(
                 f"Unsupported AI provider: {provider}. Supported providers: lmstudio, ollama, api"
@@ -932,7 +1073,11 @@ class VisionProcessorFactory:
 class TagConsolidator:
     """Consolidates similar tags in Emby library to reduce tag count"""
 
-    def __init__(self, emby_client: EmbyVideoTagger, vision_processor: Optional[BaseVisionProcessor] = None):
+    def __init__(
+        self,
+        emby_client: EmbyVideoTagger,
+        vision_processor: Optional[BaseVisionProcessor] = None,
+    ):
         self.emby_client = emby_client
         self.vision_processor = vision_processor
         self.logger = logging.getLogger(__name__)
@@ -940,8 +1085,8 @@ class TagConsolidator:
     def _normalize_tag(self, tag: str) -> str:
         """Normalize a tag to canonical form"""
         normalized = tag.lower().strip()
-        normalized = re.sub(r'[-_]+', ' ', normalized)
-        normalized = re.sub(r'\s+', ' ', normalized)
+        normalized = re.sub(r"[-_]+", " ", normalized)
+        normalized = re.sub(r"\s+", " ", normalized)
         return normalized
 
     def find_duplicate_groups(self, tags: List[str]) -> Dict[str, List[str]]:
@@ -952,19 +1097,21 @@ class TagConsolidator:
             if norm not in groups:
                 groups[norm] = []
             groups[norm].append(tag)
-        
+
         # Return only groups with duplicates
         return {k: v for k, v in groups.items() if len(v) > 1}
 
     def choose_canonical_tag(self, tag_variants: List[str]) -> str:
         """Choose the best canonical form from variants (prefer space-separated, lowercase)"""
         # Prefer the shortest tag that uses spaces (not hyphens/underscores)
-        space_tags = [t for t in tag_variants if '-' not in t and '_' not in t]
+        space_tags = [t for t in tag_variants if "-" not in t and "_" not in t]
         if space_tags:
             return min(space_tags, key=len)
         return min(tag_variants, key=len)
 
-    def find_semantic_duplicates_llm(self, tags: List[str], batch_size: int = 1000) -> List[Tuple[str, str]]:
+    def find_semantic_duplicates_llm(
+        self, tags: List[str], batch_size: int = 1000
+    ) -> List[Tuple[str, str]]:
         """Use configured LLM to find semantically similar tags that should be merged"""
         if not self.vision_processor:
             self.logger.warning("No vision processor configured for semantic analysis")
@@ -973,36 +1120,33 @@ class TagConsolidator:
         return self.vision_processor.analyze_tags_for_consolidation(tags, batch_size)
 
     def consolidate_tags(
-        self, 
-        dry_run: bool = True, 
-        use_llm: bool = False,
-        interactive: bool = True
+        self, dry_run: bool = True, use_llm: bool = False, interactive: bool = True
     ) -> Dict[str, Any]:
         """
         Main consolidation function.
-        
+
         Args:
             dry_run: If True, only report what would be done without making changes
             use_llm: If True, also use LLM to find semantic duplicates
             interactive: If True, prompt for confirmation before each merge
-        
+
         Returns:
             Statistics about the consolidation
         """
         self.logger.info("Starting tag consolidation...")
-        
+
         # Get all tags
         all_tags = self.emby_client.get_all_tags()
         self.logger.info(f"Found {len(all_tags)} total tags")
-        
+
         stats = {
             "total_tags": len(all_tags),
             "duplicate_groups": 0,
             "tags_merged": 0,
             "videos_updated": 0,
-            "merge_details": []
+            "merge_details": [],
         }
-        
+
         # Find rule-based duplicates (normalization)
         duplicate_groups = self.find_duplicate_groups(all_tags)
         stats["duplicate_groups"] = len(duplicate_groups)
@@ -1019,9 +1163,7 @@ class TagConsolidator:
             # Skip any duplicate group whose normalized form matches a protected
             # marker tag (e.g. ["ai-generated", "ai generated"]).
             if norm_form in protected_normalized:
-                self.logger.info(
-                    f"Skipping protected marker tag group: {variants}"
-                )
+                self.logger.info(f"Skipping protected marker tag group: {variants}")
                 print(f"\nDuplicate group: {variants}")
                 print("  -> Protected marker tag, will NOT merge.")
                 continue
@@ -1035,7 +1177,7 @@ class TagConsolidator:
             merge_info = {
                 "canonical": canonical,
                 "merged": tags_to_merge,
-                "videos_affected": 0
+                "videos_affected": 0,
             }
 
             print(f"\nDuplicate group: {variants}")
@@ -1044,7 +1186,7 @@ class TagConsolidator:
 
             if interactive and not dry_run:
                 confirm = input("  Proceed with merge? [y/N]: ").strip().lower()
-                if confirm != 'y':
+                if confirm != "y":
                     print("  Skipped.")
                     continue
 
@@ -1064,13 +1206,16 @@ class TagConsolidator:
                     stats["tags_merged"] += 1
 
             stats["merge_details"].append(merge_info)
-        
+
         # Optional: LLM-based semantic duplicate detection
         if use_llm:
             self.logger.info("Running LLM-based semantic analysis...")
             # Get updated tag list (excluding already merged)
-            remaining_tags = [t for t in all_tags
-                           if not any(t in d["merged"] for d in stats["merge_details"])]
+            remaining_tags = [
+                t
+                for t in all_tags
+                if not any(t in d["merged"] for d in stats["merge_details"])
+            ]
 
             semantic_merges = self.find_semantic_duplicates_llm(remaining_tags)
 
@@ -1081,8 +1226,10 @@ class TagConsolidator:
                 # Never merge away a protected marker tag (either as the source
                 # or as the target). Doing so would cause already-processed
                 # videos to be reprocessed on the next run.
-                if (self._normalize_tag(old_tag) in protected_normalized
-                        or self._normalize_tag(canonical) in protected_normalized):
+                if (
+                    self._normalize_tag(old_tag) in protected_normalized
+                    or self._normalize_tag(canonical) in protected_normalized
+                ):
                     self.logger.info(
                         f"Skipping protected marker tag merge: '{old_tag}' -> '{canonical}'"
                     )
@@ -1096,7 +1243,7 @@ class TagConsolidator:
 
                 if interactive and not dry_run:
                     confirm = input("  Proceed with merge? [y/N]: ").strip().lower()
-                    if confirm != 'y':
+                    if confirm != "y":
                         print("  Skipped.")
                         continue
 
@@ -1104,7 +1251,7 @@ class TagConsolidator:
                     "canonical": canonical,
                     "merged": [old_tag],
                     "videos_affected": 0,
-                    "semantic": True
+                    "semantic": True,
                 }
 
                 if not dry_run:
@@ -1120,7 +1267,7 @@ class TagConsolidator:
                     stats["tags_merged"] += 1
 
                 stats["merge_details"].append(merge_info)
-        
+
         return stats
 
     def print_stats(self, stats: Dict):
@@ -1132,10 +1279,12 @@ class TagConsolidator:
         print(f"Duplicate groups found: {stats['duplicate_groups']}")
         print(f"Tags merged: {stats['tags_merged']}")
         print(f"Videos updated: {stats['videos_updated']}")
-        
-        if stats['merge_details']:
-            print(f"\nEstimated tags after consolidation: "
-                  f"{stats['total_tags'] - stats['tags_merged']}")
+
+        if stats["merge_details"]:
+            print(
+                f"\nEstimated tags after consolidation: "
+                f"{stats['total_tags'] - stats['tags_merged']}"
+            )
         print("=" * 50)
 
 
@@ -1185,7 +1334,7 @@ class VideoTaggingAutomation:
         """Initialize SQLite database for tracking processing tasks"""
         db_path = "video_tasks.db"
         conn = sqlite3.connect(db_path)
-        
+
         # Create table if it doesn't exist
         conn.execute(
             """
@@ -1202,17 +1351,21 @@ class VideoTaggingAutomation:
             )
         """
         )
-        
+
         # Check if source_type column exists and add it if missing (migration)
         cursor = conn.execute("PRAGMA table_info(video_tasks)")
         columns = [column[1] for column in cursor.fetchall()]
-        
-        if 'source_type' not in columns:
+
+        if "source_type" not in columns:
             self.logger.info("Migrating database: Adding source_type column")
-            conn.execute("ALTER TABLE video_tasks ADD COLUMN source_type TEXT DEFAULT 'recent'")
+            conn.execute(
+                "ALTER TABLE video_tasks ADD COLUMN source_type TEXT DEFAULT 'recent'"
+            )
             # Update existing records to have 'recent' as source_type
-            conn.execute("UPDATE video_tasks SET source_type = 'recent' WHERE source_type IS NULL")
-        
+            conn.execute(
+                "UPDATE video_tasks SET source_type = 'recent' WHERE source_type IS NULL"
+            )
+
         conn.commit()
         conn.close()
         return db_path
@@ -1221,7 +1374,7 @@ class VideoTaggingAutomation:
         """Configure APScheduler for automated processing"""
         # Use memory job store instead of SQLAlchemy to avoid pickling issues
         from apscheduler.jobstores.memory import MemoryJobStore
-        
+
         jobstores = {"default": MemoryJobStore()}
         executors = {"default": ThreadPoolExecutor(2)}  # Limit concurrent processing
         job_defaults = {"coalesce": True, "max_instances": 1}
@@ -1243,7 +1396,6 @@ class VideoTaggingAutomation:
         self.logger.info(f"Added new job '{job_id}'")
 
         return scheduler
-
 
     def _remap_video_path(self, emby_path: str) -> str:
         """Remap Emby server path to local machine path"""
@@ -1269,8 +1421,15 @@ class VideoTaggingAutomation:
         video_path = self._remap_video_path(emby_video_path)
         video_name = video.get("Name", "Unknown")
 
-        self.logger.info(f"Starting frame extraction for {source_type} video: {video_name}")
-        self._update_task_status(video_id, TaskStatus.PENDING_EXTRACTION, file_path=video_path, source_type=source_type)
+        self.logger.info(
+            f"Starting frame extraction for {source_type} video: {video_name}"
+        )
+        self._update_task_status(
+            video_id,
+            TaskStatus.PENDING_EXTRACTION,
+            file_path=video_path,
+            source_type=source_type,
+        )
 
         try:
             frame_output_dir = Path(self.frame_cache_path) / video_id
@@ -1287,7 +1446,9 @@ class VideoTaggingAutomation:
             if not frame_paths:
                 raise ValueError("No frames were extracted from the video.")
 
-            self.logger.info(f"Successfully extracted {len(frame_paths)} frames for {video_name}")
+            self.logger.info(
+                f"Successfully extracted {len(frame_paths)} frames for {video_name}"
+            )
             self._update_task_status(video_id, TaskStatus.PENDING_ANALYSIS)
             return True
 
@@ -1298,17 +1459,21 @@ class VideoTaggingAutomation:
 
     def _analyze_frames_for_video(self, task: Dict) -> bool:
         """Analyzes cached frames for a single video and updates Emby."""
-        video_id = task['emby_id']
-        video_path = task['file_path']
+        video_id = task["emby_id"]
+        video_path = task["file_path"]
         video_name = Path(video_path).name
 
-        self.logger.info(f"Starting frame analysis for video: {video_name} (ID: {video_id})")
+        self.logger.info(
+            f"Starting frame analysis for video: {video_name} (ID: {video_id})"
+        )
         self._update_task_status(video_id, TaskStatus.PROCESSING)
 
         try:
             frame_cache_dir = Path(self.frame_cache_path) / video_id
             if not frame_cache_dir.exists():
-                raise FileNotFoundError(f"Frame cache directory not found for video {video_id}")
+                raise FileNotFoundError(
+                    f"Frame cache directory not found for video {video_id}"
+                )
 
             frame_paths = [str(p) for p in frame_cache_dir.glob("*.jpg")]
             if not frame_paths:
@@ -1318,9 +1483,11 @@ class VideoTaggingAutomation:
 
             # Get all existing tags from Emby library for prioritization
             all_existing_tags = self.emby_client.get_all_tags()
-            
+
             # Pass existing tags to the vision processor for prioritization
-            tags = self.vision_processor.analyze_frames_sync(frame_paths, all_existing_tags)
+            tags = self.vision_processor.analyze_frames_sync(
+                frame_paths, all_existing_tags
+            )
 
             if not tags:
                 raise ValueError("No tags were generated from frame analysis.")
@@ -1331,30 +1498,40 @@ class VideoTaggingAutomation:
             video_details = response.json()["Items"][0]
 
             existing_video_tags = [x["Name"] for x in video_details.get("TagItems", [])]
-            
+
             # Normalize and deduplicate tags, preferring existing tag forms
-            normalized_new_tags = self.vision_processor.normalize_tags(tags, all_existing_tags)
-            
+            normalized_new_tags = self.vision_processor.normalize_tags(
+                tags, all_existing_tags
+            )
+
             # Combine with existing video tags and add ai-generated marker
             combined_tags = existing_video_tags + normalized_new_tags + ["ai-generated"]
-            
+
             # Final normalization pass to collapse any duplicates
-            all_tags = self.vision_processor.normalize_tags(combined_tags, all_existing_tags)
-            
+            all_tags = self.vision_processor.normalize_tags(
+                combined_tags, all_existing_tags
+            )
+
             # Ensure ai-generated is present
             if "ai-generated" not in all_tags:
                 all_tags.append("ai-generated")
 
             success = self.emby_client.update_video_tags(video_id, all_tags)
             if success:
-                self.logger.info(f"Successfully updated {video_name} with {len(normalized_new_tags)} new tags.")
-                self._update_task_status(video_id, TaskStatus.COMPLETED, tag_count=len(normalized_new_tags))
+                self.logger.info(
+                    f"Successfully updated {video_name} with {len(normalized_new_tags)} new tags."
+                )
+                self._update_task_status(
+                    video_id, TaskStatus.COMPLETED, tag_count=len(normalized_new_tags)
+                )
 
                 try:
                     shutil.rmtree(frame_cache_dir)
                     self.logger.info(f"Cleaned up frame cache for video {video_id}")
                 except Exception as e:
-                    self.logger.warning(f"Failed to clean up frame cache for video {video_id}: {e}")
+                    self.logger.warning(
+                        f"Failed to clean up frame cache for video {video_id}: {e}"
+                    )
 
                 return True
             else:
@@ -1372,7 +1549,7 @@ class VideoTaggingAutomation:
         try:
             cursor = conn.execute(
                 "SELECT emby_id, file_path, source_type FROM video_tasks WHERE status = ?",
-                (TaskStatus.PENDING_ANALYSIS.value,)
+                (TaskStatus.PENDING_ANALYSIS.value,),
             )
             tasks = [dict(row) for row in cursor.fetchall()]
             self.logger.info(f"Found {len(tasks)} videos pending analysis.")
@@ -1394,23 +1571,23 @@ class VideoTaggingAutomation:
         """Sanitize filename by replacing special characters that may cause issues"""
         # Dictionary of characters to replace
         char_replacements = {
-            '|': '-',
-            '<': '-',
-            '>': '-',
-            ':': '-',
+            "|": "-",
+            "<": "-",
+            ">": "-",
+            ":": "-",
             '"': "'",
-            '/': '-',
-            '\\': '-',
-            '?': '',
-            '*': '',
+            "/": "-",
+            "\\": "-",
+            "?": "",
+            "*": "",
         }
-        
+
         sanitized = filename
         for char, replacement in char_replacements.items():
             sanitized = sanitized.replace(char, replacement)
-        
+
         # Remove multiple consecutive dashes and clean up
-        sanitized = re.sub(r'-+', '-', sanitized).strip('- ')
+        sanitized = re.sub(r"-+", "-", sanitized).strip("- ")
 
         return sanitized
 
@@ -1418,44 +1595,52 @@ class VideoTaggingAutomation:
         """Copy favorite video to destination folder if configured"""
         if not self.copy_favorites_to:
             return True  # No copy destination configured, skip silently
-        
+
         try:
             # Ensure destination directory exists
             dest_dir = Path(self.copy_favorites_to)
             dest_dir.mkdir(parents=True, exist_ok=True)
-            
+
             # Get source file info
             source_path = Path(video_path)
             if not source_path.exists():
-                self.logger.warning(f"Source video file not found for copy: {video_path}")
+                self.logger.warning(
+                    f"Source video file not found for copy: {video_path}"
+                )
                 return False
-            
+
             # Create destination path with sanitized filename (flat structure)
             sanitized_filename = self._sanitize_filename(source_path.name)
             dest_path = dest_dir / sanitized_filename
             orig_dest_path = dest_dir / source_path.name
-            
+
             # Log filename sanitization if it changed
             if sanitized_filename != source_path.name:
-                self.logger.info(f"Sanitized filename: '{source_path.name}' -> '{sanitized_filename}'")
+                self.logger.info(
+                    f"Sanitized filename: '{source_path.name}' -> '{sanitized_filename}'"
+                )
                 if orig_dest_path.exists():
                     os.remove(orig_dest_path)
-            
+
             # Check if file already exists
             if dest_path.exists():
                 # Compare file sizes to determine if it's the same file
                 if dest_path.stat().st_size == source_path.stat().st_size:
-                    self.logger.info(f"Video already exists in destination, skipping copy: {dest_path}")
+                    self.logger.info(
+                        f"Video already exists in destination, skipping copy: {dest_path}"
+                    )
                     return True
                 else:
-                    self.logger.warning(f"File exists but different size, overwriting: {dest_path}")
-            
+                    self.logger.warning(
+                        f"File exists but different size, overwriting: {dest_path}"
+                    )
+
             # Copy the file
             self.logger.info(f"Copying favorite video: {source_path} -> {dest_path}")
             shutil.copy2(source_path, dest_path)
             self.logger.info(f"Successfully copied favorite video to: {dest_path}")
             return True
-            
+
         except Exception as e:
             self.logger.error(f"Failed to copy favorite video {video_name}: {str(e)}")
             return False
@@ -1541,7 +1726,9 @@ class VideoTaggingAutomation:
         try:
             if status == TaskStatus.PENDING_EXTRACTION:
                 if not file_path:
-                    self.logger.error(f"File path is required for PENDING_EXTRACTION status for video {video_id}")
+                    self.logger.error(
+                        f"File path is required for PENDING_EXTRACTION status for video {video_id}"
+                    )
                     return
                 # This is the entry point for a new task, resets all fields.
                 conn.execute(
@@ -1565,7 +1752,9 @@ class VideoTaggingAutomation:
                     (status.value, video_id),
                 )
             else:
-                self.logger.warning(f"Unhandled status update for video {video_id}: {status}")
+                self.logger.warning(
+                    f"Unhandled status update for video {video_id}: {status}"
+                )
 
             conn.commit()
 
@@ -1622,17 +1811,29 @@ class VideoTaggingAutomation:
         # --- Analysis Pass ---
         self.logger.info("Running manual analysis...")
 
+        # Wait for the vision API to be ready (self-hosted servers may 503
+        # for ~30s while the model loads on first call).
+        ready_timeout = self.config.get("api_ready_timeout_seconds", 300)
+        poll_interval = self.config.get("api_ready_poll_interval_seconds", 5.0)
+        if not self.vision_processor.wait_until_ready(ready_timeout, poll_interval):
+            self.logger.error(
+                "Vision API never became ready; aborting manual analysis."
+            )
+            return False
+
         # Create a task dictionary that mimics what would be in the database
         task = {
-            'emby_id': video_id,
-            'file_path': self._remap_video_path(video_details["Path"]),
-            'source_type': 'manual'
+            "emby_id": video_id,
+            "file_path": self._remap_video_path(video_details["Path"]),
+            "source_type": "manual",
         }
 
         analysis_success = self._analyze_frames_for_video(task)
 
         if analysis_success:
-            self.logger.info(f"Manual processing completed successfully for video ID: {video_id}")
+            self.logger.info(
+                f"Manual processing completed successfully for video ID: {video_id}"
+            )
         else:
             self.logger.error(f"Manual analysis failed for video ID: {video_id}")
 
@@ -1692,7 +1893,9 @@ class VideoTaggingAutomation:
             all_videos.extend([(video, "favorites") for video in favorite_videos])
         else:
             recent_videos = self.emby_client.get_recent_videos(days_back=self.days_back)
-            self.logger.info(f"Found {len(recent_videos)} recent videos for extraction.")
+            self.logger.info(
+                f"Found {len(recent_videos)} recent videos for extraction."
+            )
             all_videos.extend([(video, "recent") for video in recent_videos])
 
             if self.process_favorites:
@@ -1724,11 +1927,17 @@ class VideoTaggingAutomation:
             if self._should_process_video(video, completed_ids)
         ]
 
-        self.logger.info(f"Found {len(videos_to_process)} videos needing frame extraction.")
+        self.logger.info(
+            f"Found {len(videos_to_process)} videos needing frame extraction."
+        )
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=self.max_concurrent_videos) as executor:
+        with concurrent.futures.ThreadPoolExecutor(
+            max_workers=self.max_concurrent_videos
+        ) as executor:
             future_to_video = {
-                executor.submit(self._extract_frames_for_video, video, source_type): video
+                executor.submit(
+                    self._extract_frames_for_video, video, source_type
+                ): video
                 for video, source_type in videos_to_process
             }
             for future in concurrent.futures.as_completed(future_to_video):
@@ -1736,7 +1945,9 @@ class VideoTaggingAutomation:
                 try:
                     future.result()
                 except Exception as e:
-                    self.logger.error(f"Extraction failed for video {video.get('Name', 'Unknown')}: {e}")
+                    self.logger.error(
+                        f"Extraction failed for video {video.get('Name', 'Unknown')}: {e}"
+                    )
 
     def run_analysis_pass(self):
         """Runs the frame analysis pass."""
@@ -1748,9 +1959,23 @@ class VideoTaggingAutomation:
             self.logger.info("No videos are currently pending analysis.")
             return
 
+        # Wait for the vision API to be ready before spending time analysing frames.
+        # Self-hosted servers often return 503 for ~30s while the model loads on
+        # first call; probing first avoids wasting work that would just fail.
+        ready_timeout = self.config.get("api_ready_timeout_seconds", 300)
+        poll_interval = self.config.get("api_ready_poll_interval_seconds", 5.0)
+        if not self.vision_processor.wait_until_ready(ready_timeout, poll_interval):
+            self.logger.error(
+                "Vision API never became ready; skipping this analysis pass. "
+                "Tasks will be retried on the next run."
+            )
+            return
+
         self.logger.info(f"Found {len(tasks_to_process)} videos to analyze.")
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=self.max_concurrent_videos) as executor:
+        with concurrent.futures.ThreadPoolExecutor(
+            max_workers=self.max_concurrent_videos
+        ) as executor:
             future_to_task = {
                 executor.submit(self._analyze_frames_for_video, task): task
                 for task in tasks_to_process
@@ -1760,7 +1985,9 @@ class VideoTaggingAutomation:
                 try:
                     future.result()
                 except Exception as e:
-                    self.logger.error(f"Analysis failed for video ID {task['emby_id']}: {e}")
+                    self.logger.error(
+                        f"Analysis failed for video ID {task['emby_id']}: {e}"
+                    )
 
     def run_once(self):
         """Run processing once without scheduling"""
@@ -1819,7 +2046,9 @@ def main():
         },
         "api": {
             "model_name": os.getenv("API_MODEL_NAME", "glm-4.5v"),
-            "base_url": os.getenv("API_BASE_URL", "https://api.z.ai/api/paas/v4/chat/completions"),
+            "base_url": os.getenv(
+                "API_BASE_URL", "https://api.z.ai/api/paas/v4/chat/completions"
+            ),
             "auth_token": os.getenv("API_AUTH_TOKEN"),
             "max_concurrent_requests": int(os.getenv("API_MAX_CONCURRENT", "3")),
         },
@@ -1831,6 +2060,10 @@ def main():
         "max_concurrent_videos": int(os.getenv("MAX_CONCURRENT_VIDEOS", "2")),  # Added
         "frame_cache_path": os.getenv("FRAME_CACHE_PATH", "/tmp/frame_cache"),
         "max_pixels": int(os.getenv("MAX_PIXELS", str(800 * 800))),
+        "api_ready_timeout_seconds": int(os.getenv("API_READY_TIMEOUT_SECONDS", "300")),
+        "api_ready_poll_interval_seconds": float(
+            os.getenv("API_READY_POLL_INTERVAL_SECONDS", "5.0")
+        ),
     }
 
     # Validate configuration
@@ -1900,36 +2133,60 @@ def main():
             dry_run = "--dry-run" in sys.argv
             use_llm = "--use-llm" in sys.argv
             no_interactive = "--no-interactive" in sys.argv
-            
+
             # Use the same vision processor configured for tagging
             vision_processor = automation.vision_processor if use_llm else None
-            
+
             consolidator = TagConsolidator(automation.emby_client, vision_processor)
-            
+
             if dry_run:
                 print("DRY RUN MODE - No changes will be made\n")
-            
+
             stats = consolidator.consolidate_tags(
                 dry_run=dry_run,
                 use_llm=use_llm,
-                interactive=not no_interactive and not dry_run
+                interactive=not no_interactive and not dry_run,
             )
             consolidator.print_stats(stats)
         else:
             print("Usage:")
-            print("  python emby_video_tagger.py                    # Run scheduled automation")
-            print("  python emby_video_tagger.py once               # Run once without scheduling")
-            print("  python emby_video_tagger.py once --include-favorites  # Run once including favorites")
-            print("  python emby_video_tagger.py favorites          # Process only favorite videos")
-            print("  python emby_video_tagger.py extract            # Run frame extraction pass")
-            print("  python emby_video_tagger.py extract --include-favorites # Run extraction pass including favorites")
-            print("  python emby_video_tagger.py analyze            # Run frame analysis pass")
-            print("  python emby_video_tagger.py stats              # Show processing statistics")
-            print("  python emby_video_tagger.py manual <video_id>  # Process specific video")
-            print("  python emby_video_tagger.py consolidate-tags   # Consolidate duplicate tags")
+            print(
+                "  python emby_video_tagger.py                    # Run scheduled automation"
+            )
+            print(
+                "  python emby_video_tagger.py once               # Run once without scheduling"
+            )
+            print(
+                "  python emby_video_tagger.py once --include-favorites  # Run once including favorites"
+            )
+            print(
+                "  python emby_video_tagger.py favorites          # Process only favorite videos"
+            )
+            print(
+                "  python emby_video_tagger.py extract            # Run frame extraction pass"
+            )
+            print(
+                "  python emby_video_tagger.py extract --include-favorites # Run extraction pass including favorites"
+            )
+            print(
+                "  python emby_video_tagger.py analyze            # Run frame analysis pass"
+            )
+            print(
+                "  python emby_video_tagger.py stats              # Show processing statistics"
+            )
+            print(
+                "  python emby_video_tagger.py manual <video_id>  # Process specific video"
+            )
+            print(
+                "  python emby_video_tagger.py consolidate-tags   # Consolidate duplicate tags"
+            )
             print("    Options:")
-            print("      --dry-run        Show what would be merged without making changes")
-            print("      --use-llm        Use LLM to find semantic duplicates (requires Ollama)")
+            print(
+                "      --dry-run        Show what would be merged without making changes"
+            )
+            print(
+                "      --use-llm        Use LLM to find semantic duplicates (requires Ollama)"
+            )
             print("      --no-interactive Skip confirmation prompts")
     else:
         # Run with scheduling
