@@ -23,10 +23,8 @@ import subprocess
 import modal
 
 # --- Variables ---
-#FILENAME = "Qwen3-VL-8B-NSFW-Caption-V4.5.Q8_0.gguf"
-#MPROJ_FILENAME = "Qwen3-VL-8B-NSFW-Caption-V4.5.mmproj-Q8_0.gguf"
-FILENAME = "qwen3.5-9b-nsfw-captioning-v5.Q8_0.gguf"
-MPROJ_FILENAME = "qwen3.5-9b-nsfw-captioning-v5.mmproj-Q8_0.gguf"
+FILENAME = "Qwen3-VL-8B-NSFW-Caption-V4.5.Q8_0.gguf"
+MPROJ_FILENAME = "Qwen3-VL-8B-NSFW-Caption-V4.5.mmproj-Q8_0.gguf"
 # CHAT_TEMPLATE_FILE = "chat_template-instruct.jinja"
 ALIAS = "InternVL3_5-1B"
 N_GPU_LAYERS = "99"

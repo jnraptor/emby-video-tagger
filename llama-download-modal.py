@@ -9,12 +9,9 @@ import modal
 from pathlib import Path
 
 # --- Variables ---
-# REPO_ID = "mradermacher/Qwen3-VL-8B-NSFW-Caption-V4.5-GGUF"
-# FILENAME = "Qwen3-VL-8B-NSFW-Caption-V4.5.Q8_0.gguf"
-# MPROJ_FILENAME = "Qwen3-VL-8B-NSFW-Caption-V4.5.mmproj-Q8_0.gguf"
-REPO_ID = "mradermacher/qwen3.5-9b-nsfw-captioning-v5-GGUF"
-FILENAME = "qwen3.5-9b-nsfw-captioning-v5.Q8_0.gguf"
-MPROJ_FILENAME = "qwen3.5-9b-nsfw-captioning-v5.mmproj-Q8_0.gguf"
+REPO_ID = "mradermacher/Qwen3-VL-8B-NSFW-Caption-V4.5-GGUF"
+FILENAME = "Qwen3-VL-8B-NSFW-Caption-V4.5.Q8_0.gguf"
+MPROJ_FILENAME = "Qwen3-VL-8B-NSFW-Caption-V4.5.mmproj-Q8_0.gguf"
 
 # --- Configuration ---
 # Define the base Docker image from ghcr.io, a persistent volume for models,
