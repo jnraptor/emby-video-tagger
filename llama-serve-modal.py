@@ -58,7 +58,7 @@ llama_image = (
         force_build=False,
     )
     .run_commands(
-        "git clone --depth 1 --branch b9821 https://github.com/ggml-org/llama.cpp",
+        "git clone --depth 1 --branch b9831 https://github.com/ggml-org/llama.cpp",
         force_build=False,
     )
     .run_commands("lscpu")
@@ -97,7 +97,7 @@ app = modal.App("llama-cpp-server")
     volumes={MODEL_DIR: model_volume},
     timeout=60 * 5,  # 5 minutes max input runtime
     scaledown_window=300,  # Timeout after 5 minutes of inactivity.
-    min_containers=1,  # Keep at least one container running for fast startup
+    min_containers=0,  # Keep at least one container running for fast startup
     secrets=[
         modal.Secret.from_name("LLAMA_API_KEY")
     ],  # load LLAMA_API_KEY from secrets
@@ -107,7 +107,8 @@ app = modal.App("llama-cpp-server")
 def serve():
 
     cmd = [
-        "/llama.cpp/llama-server --port 8080 --host 0.0.0.0 --fit on --jinja --chat-template-kwargs '{\"enable_thinking\": false}'"
+        #"/llama.cpp/llama-server --port 8080 --host 0.0.0.0 --fit on --jinja --chat-template-kwargs '{\"enable_thinking\": false}'"
+        "/llama.cpp/llama-server --port 8080 --host 0.0.0.0 --fit on --jinja"
     ]
     print(cmd)
     subprocess.Popen(" ".join(cmd), shell=True)
