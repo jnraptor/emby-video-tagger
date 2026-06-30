@@ -1021,7 +1021,11 @@ class APIVisionProcessor(BaseVisionProcessor):
     def _is_api_ready(self) -> bool:
         """Probe the OpenAI-compatible API by hitting /models. 503 = not ready, 200 = ready."""
         try:
-            models_url = self.base_url.rsplit("/", 1)[0] + "/models"
+            base = self.base_url.rstrip("/")
+            if base.endswith("/chat/completions"):
+                models_url = base[: -len("/chat/completions")] + "/models"
+            else:
+                models_url = base.rsplit("/", 1)[0] + "/models"
             response = requests.get(models_url, headers=self.headers, timeout=10)
             if response.status_code == 200:
                 return True
