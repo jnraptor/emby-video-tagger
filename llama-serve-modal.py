@@ -35,7 +35,7 @@ PARALLEL = "3"
 # Pre-built llama.cpp image tag from ghcr.io/ggml-org/llama.cpp.
 # The project publishes server images tagged as `server-cudaNN`, e.g.
 # `server-cuda13` for CUDA 13 builds. Bump this when upgrading llama.cpp.
-TAG_IMAGE = "server-cuda13-b9870"
+TAG_IMAGE = "server-cuda13-b9879"
 GPU = "L4"  # T4, L4, A10 Available GPUs: https://modal.com/pricing, https://modal.com/docs/guide/gpu#specifying-gpu-type
 
 # --- Configuration ---
