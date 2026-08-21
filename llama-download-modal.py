@@ -5,8 +5,9 @@
 # --- USAGE ---
 # modal run llama-download-modal.py
 
-import modal
 from pathlib import Path
+
+import modal
 
 # --- Variables ---
 REPO_ID = "mradermacher/Qwen3-VL-8B-NSFW-Caption-V4.5-GGUF"

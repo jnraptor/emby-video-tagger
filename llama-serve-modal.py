@@ -47,9 +47,7 @@ model_volume = modal.Volume.from_name("llama-models-store", create_if_missing=Tr
 MODEL_DIR = "/models"
 llama_image = (
     modal.Image.from_registry(
-        f"ghcr.io/ggml-org/llama.cpp:{TAG_IMAGE}",
-        add_python="3.12",
-        force_build=True
+        f"ghcr.io/ggml-org/llama.cpp:{TAG_IMAGE}", add_python="3.12", force_build=True
     )
     .entrypoint([])  # remove the base container entrypoint so Modal can run our server
     .env(

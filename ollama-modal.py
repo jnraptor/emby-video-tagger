@@ -19,7 +19,6 @@
 
 import asyncio
 import subprocess
-from typing import List
 
 import modal
 
@@ -65,7 +64,7 @@ ollama_image = (
             "OLLAMA_MAX_LOADED_MODELS": "1",
             "OLLAMA_NUM_PARALLEL": "3",
             "OLLAMA_FLASH_ATTENTION": "1",
-            "OLLAMA_NEW_ENGINE": "true"
+            "OLLAMA_NEW_ENGINE": "true",
         }
     )
 )
@@ -244,7 +243,7 @@ class OllamaServer:
                 print(f"\n--- Testing Prompt ---\n{prompt}\n----------------------")
 
                 # Create message in OpenAI format
-                messages: List[ChatCompletionMessageParam] = [
+                messages: list[ChatCompletionMessageParam] = [
                     {"role": "user", "content": prompt}
                 ]
 

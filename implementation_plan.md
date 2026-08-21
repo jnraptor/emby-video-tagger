@@ -33,36 +33,40 @@ def _copy_favorite_video(self, video_path: str, video_name: str) -> bool:
     """Copy favorite video to destination folder if configured"""
     if not self.copy_favorites_to:
         return True  # No copy destination configured, skip silently
-    
+
     try:
         # Ensure destination directory exists
         dest_dir = Path(self.copy_favorites_to)
         dest_dir.mkdir(parents=True, exist_ok=True)
-        
+
         # Get source file info
         source_path = Path(video_path)
         if not source_path.exists():
             self.logger.warning(f"Source video file not found for copy: {video_path}")
             return False
-        
+
         # Create destination path (flat structure)
         dest_path = dest_dir / source_path.name
-        
+
         # Check if file already exists
         if dest_path.exists():
             # Compare file sizes to determine if it's the same file
             if dest_path.stat().st_size == source_path.stat().st_size:
-                self.logger.info(f"Video already exists in destination, skipping copy: {dest_path}")
+                self.logger.info(
+                    f"Video already exists in destination, skipping copy: {dest_path}"
+                )
                 return True
             else:
-                self.logger.warning(f"File exists but different size, overwriting: {dest_path}")
-        
+                self.logger.warning(
+                    f"File exists but different size, overwriting: {dest_path}"
+                )
+
         # Copy the file
         self.logger.info(f"Copying favorite video: {source_path} -> {dest_path}")
         shutil.copy2(source_path, dest_path)
         self.logger.info(f"Successfully copied favorite video to: {dest_path}")
         return True
-        
+
     except Exception as e:
         self.logger.error(f"Failed to copy favorite video {video_name}: {str(e)}")
         return False

@@ -23,33 +23,33 @@ Environment Variables:
 - DAYS_BACK: Number of days back to look for recent videos (optional, default: 5)
 """
 
-import requests
+import base64
+import concurrent.futures
+import json
+import logging
+import os
+import re
+import shutil
+import sqlite3
+import time
+from abc import ABC, abstractmethod
+from datetime import datetime, timedelta
+from enum import Enum
+from io import BytesIO
+from pathlib import Path
+from typing import Any
+
 import cv2
 import lmstudio as lms
-from ollama import Client
-import base64
-import json
-import time
-import logging
-import sqlite3
-from pathlib import Path
-from typing import List, Dict, Tuple, Optional, Any
-from enum import Enum
-from datetime import datetime, timedelta
-from scenedetect import SceneManager, AdaptiveDetector, open_video
+import requests
+from apscheduler.executors.pool import ThreadPoolExecutor
 
 # from scenedetect import detect, ContentDetector
 from apscheduler.schedulers.blocking import BlockingScheduler
-from apscheduler.executors.pool import ThreadPoolExecutor
-import os
-import shutil
 from dotenv import load_dotenv
-from abc import ABC, abstractmethod
-import re
-import concurrent.futures
+from ollama import Client
 from PIL import Image
-from io import BytesIO
-
+from scenedetect import AdaptiveDetector, SceneManager, open_video
 
 PROCESSED_MARKER_TAGS = ["ai-generated", "auto-tagged", "vision-analyzed"]
 
@@ -116,7 +116,7 @@ class EmbyVideoTagger:
         )
         return session
 
-    def get_recent_videos(self, days_back: int = 7) -> List[Dict]:
+    def get_recent_videos(self, days_back: int = 7) -> list[dict]:
         """Retrieve recently added videos from Emby"""
         url = f"{self.base_url}/emby/Users/{self.user_id}/Items"
         params = {
@@ -150,7 +150,7 @@ class EmbyVideoTagger:
             self.logger.error(f"Failed to retrieve recent videos: {e}")
             return []
 
-    def get_favorite_videos(self) -> List[Dict]:
+    def get_favorite_videos(self) -> list[dict]:
         """Retrieve favorite videos from Emby"""
         url = f"{self.base_url}/emby/Users/{self.user_id}/Items"
         params = {
@@ -175,7 +175,7 @@ class EmbyVideoTagger:
             self.logger.error(f"Failed to retrieve favorite videos: {e}")
             return []
 
-    def update_video_tags(self, item_id: str, new_tags: List[str]) -> bool:
+    def update_video_tags(self, item_id: str, new_tags: list[str]) -> bool:
         """Update video tags in Emby"""
         updateUrl = f"{self.base_url}/emby/Items/{item_id}"
 
@@ -199,7 +199,7 @@ class EmbyVideoTagger:
             self.logger.error(f"Failed to update tags for item {item_id}: {e}")
             return False
 
-    def get_all_tags(self) -> List[str]:
+    def get_all_tags(self) -> list[str]:
         """Retrieve all existing tags from the Emby library"""
         url = f"{self.base_url}/emby/Tags"
 
@@ -214,7 +214,7 @@ class EmbyVideoTagger:
             self.logger.warning(f"Failed to retrieve existing tags: {e}")
             return []
 
-    def get_videos_with_tag(self, tag: str) -> List[Dict]:
+    def get_videos_with_tag(self, tag: str) -> list[dict]:
         """Retrieve all videos that have a specific tag"""
         url = f"{self.base_url}/emby/Users/{self.user_id}/Items"
         params = {
@@ -282,7 +282,7 @@ class IntelligentFrameExtractor:
 
     def extract_representative_frames(
         self, video_path: str, output_dir: str, max_frames: int = 10
-    ) -> List[Tuple[str, int]]:
+    ) -> list[tuple[str, int]]:
         """Extract key frames using scene detection and save to a directory"""
 
         if not Path(video_path).exists():
@@ -353,8 +353,8 @@ class IntelligentFrameExtractor:
             return frame  # Return original frame if resizing fails
 
     def _extract_scene_frames(
-        self, video_path: str, scene_list: List, output_dir: Path, max_frames: int
-    ) -> List[Tuple[str, int]]:
+        self, video_path: str, scene_list: list, output_dir: Path, max_frames: int
+    ) -> list[tuple[str, int]]:
         """Extract frames from detected scenes"""
         cap = cv2.VideoCapture(video_path)
         if not cap.isOpened():
@@ -421,7 +421,7 @@ class IntelligentFrameExtractor:
 
     def _fallback_extraction(
         self, video_path: str, output_dir: Path, max_frames: int
-    ) -> List[Tuple[str, int]]:
+    ) -> list[tuple[str, int]]:
         """Fallback to uniform sampling if scene detection fails"""
         cap = cv2.VideoCapture(video_path)
         if not cap.isOpened():
@@ -475,7 +475,7 @@ class BaseVisionProcessor(ABC):
         self.tag_prompt = self._create_tagging_prompt()
         self.logger = logging.getLogger(__name__)
 
-    def _create_tagging_prompt(self, existing_tags: Optional[List[str]] = None) -> str:
+    def _create_tagging_prompt(self, existing_tags: list[str] | None = None) -> str:
         return """
         Analyze this video frame and generate descriptive tags for media organization.
         
@@ -496,7 +496,7 @@ class BaseVisionProcessor(ABC):
         }
         """
 
-    def set_existing_tags(self, existing_tags: List[str]):
+    def set_existing_tags(self, existing_tags: list[str]):
         """Store existing tags for post-processing comparison"""
         self.existing_tags = existing_tags or []
         self.tag_prompt = self._create_tagging_prompt()
@@ -541,8 +541,8 @@ class BaseVisionProcessor(ABC):
         return normalized
 
     def _find_matching_existing_tag(
-        self, new_tag: str, existing_tags: List[str]
-    ) -> Optional[str]:
+        self, new_tag: str, existing_tags: list[str]
+    ) -> str | None:
         """Find an existing tag that matches the new tag (accounting for variations)"""
         new_normalized = self._normalize_tag(new_tag)
 
@@ -552,8 +552,8 @@ class BaseVisionProcessor(ABC):
         return None
 
     def normalize_tags(
-        self, tags: List[str], existing_tags: Optional[List[str]] = None
-    ) -> List[str]:
+        self, tags: list[str], existing_tags: list[str] | None = None
+    ) -> list[str]:
         """
         Normalize and deduplicate tags, preferring existing tag forms.
         Collapses similar tags like "action shot" and "action-shot" into one.
@@ -590,8 +590,8 @@ class BaseVisionProcessor(ABC):
         return result
 
     def _process_frames_parallel(
-        self, frame_paths: List[str], process_func
-    ) -> List[str]:
+        self, frame_paths: list[str], process_func
+    ) -> list[str]:
         """Process frames in parallel using ThreadPoolExecutor"""
         all_tags = []
 
@@ -625,10 +625,9 @@ class BaseVisionProcessor(ABC):
 
     @abstractmethod
     def analyze_frames_sync(
-        self, frame_paths: List[str], existing_tags: Optional[List[str]] = None
-    ) -> List[str]:
+        self, frame_paths: list[str], existing_tags: list[str] | None = None
+    ) -> list[str]:
         """Synchronous frame analysis for immediate processing"""
-        pass
 
     def wait_until_ready(
         self, timeout_seconds: int = 300, poll_interval_seconds: float = 5.0
@@ -675,11 +674,10 @@ class BaseVisionProcessor(ABC):
     @abstractmethod
     def _is_api_ready(self) -> bool:
         """Provider-specific readiness probe. Return True if the API can serve a request."""
-        pass
 
     def analyze_tags_for_consolidation(
-        self, tags: List[str], batch_size: int = 100
-    ) -> List[Tuple[str, str]]:
+        self, tags: list[str], batch_size: int = 100
+    ) -> list[tuple[str, str]]:
         """Use LLM to find semantically similar tags that should be merged"""
         merge_suggestions = []
 
@@ -721,7 +719,7 @@ Return empty array [] if no clear duplicates found."""
 
         return merge_suggestions
 
-    def _send_text_prompt(self, prompt: str) -> Optional[str]:
+    def _send_text_prompt(self, prompt: str) -> str | None:
         """Send a text-only prompt to the LLM. Override in subclasses."""
         raise NotImplementedError(
             "Subclass must implement _send_text_prompt for text analysis"
@@ -738,7 +736,7 @@ class LMStudioVisionProcessor(BaseVisionProcessor):
     ):
         super().__init__(model_name, max_concurrent_requests)
 
-    def _process_single_frame(self, frame_path: str) -> List[str]:
+    def _process_single_frame(self, frame_path: str) -> list[str]:
         """Process a single frame and return tags"""
         try:
             with lms.Client() as client:
@@ -757,7 +755,7 @@ class LMStudioVisionProcessor(BaseVisionProcessor):
                 parsed_tags = json.loads(json_content)
 
                 # Flatten all tag categories into a single list
-                frame_tags: List[str] = []
+                frame_tags: list[str] = []
                 for category, tags in parsed_tags.items():
                     if isinstance(tags, list):
                         frame_tags.extend(tags)
@@ -775,13 +773,13 @@ class LMStudioVisionProcessor(BaseVisionProcessor):
         return []
 
     def analyze_frames_sync(
-        self, frame_paths: List[str], existing_tags: Optional[List[str]] = None
-    ) -> List[str]:
+        self, frame_paths: list[str], existing_tags: list[str] | None = None
+    ) -> list[str]:
         """Synchronous frame analysis for immediate processing"""
         self.set_existing_tags(existing_tags or [])
         return self._process_frames_parallel(frame_paths, self._process_single_frame)
 
-    def _send_text_prompt(self, prompt: str) -> Optional[str]:
+    def _send_text_prompt(self, prompt: str) -> str | None:
         """Send a text-only prompt to LMStudio"""
         try:
             with lms.Client() as client:
@@ -819,7 +817,7 @@ class OllamaVisionProcessor(BaseVisionProcessor):
         # self.base_url = base_url
         self.client = Client(host=base_url)
 
-    def _process_single_frame(self, frame_path: str) -> List[str]:
+    def _process_single_frame(self, frame_path: str) -> list[str]:
         """Process a single frame and return tags"""
         time.sleep(1)  # Rate limiting
         try:
@@ -849,7 +847,7 @@ class OllamaVisionProcessor(BaseVisionProcessor):
                 parsed_tags = json.loads(json_content)
 
                 # Flatten all tag categories into a single list
-                frame_tags: List[str] = []
+                frame_tags: list[str] = []
                 for category, tags in parsed_tags.items():
                     if isinstance(tags, list):
                         frame_tags.extend(tags)
@@ -867,13 +865,13 @@ class OllamaVisionProcessor(BaseVisionProcessor):
         return []
 
     def analyze_frames_sync(
-        self, frame_paths: List[str], existing_tags: Optional[List[str]] = None
-    ) -> List[str]:
+        self, frame_paths: list[str], existing_tags: list[str] | None = None
+    ) -> list[str]:
         """Synchronous frame analysis for immediate processing using Ollama"""
         self.set_existing_tags(existing_tags or [])
         return self._process_frames_parallel(frame_paths, self._process_single_frame)
 
-    def _send_text_prompt(self, prompt: str) -> Optional[str]:
+    def _send_text_prompt(self, prompt: str) -> str | None:
         """Send a text-only prompt to Ollama"""
         try:
             response = self.client.chat(
@@ -917,7 +915,7 @@ class APIVisionProcessor(BaseVisionProcessor):
             "Content-Type": "application/json",
         }
 
-    def _process_single_frame(self, frame_path: str) -> List[str]:
+    def _process_single_frame(self, frame_path: str) -> list[str]:
         """Process a single frame and return tags"""
         try:
             # Encode image as base64
@@ -975,7 +973,7 @@ class APIVisionProcessor(BaseVisionProcessor):
                 parsed_tags = json.loads(json_content)
 
                 # Flatten all tag categories into a single list
-                frame_tags: List[str] = []
+                frame_tags: list[str] = []
                 for category, tags in parsed_tags.items():
                     if isinstance(tags, list):
                         frame_tags.extend(tags)
@@ -995,13 +993,13 @@ class APIVisionProcessor(BaseVisionProcessor):
         return []
 
     def analyze_frames_sync(
-        self, frame_paths: List[str], existing_tags: Optional[List[str]] = None
-    ) -> List[str]:
+        self, frame_paths: list[str], existing_tags: list[str] | None = None
+    ) -> list[str]:
         """Synchronous frame analysis for immediate processing using Z.AI API"""
         self.set_existing_tags(existing_tags or [])
         return self._process_frames_parallel(frame_paths, self._process_single_frame)
 
-    def _send_text_prompt(self, prompt: str) -> Optional[str]:
+    def _send_text_prompt(self, prompt: str) -> str | None:
         """Send a text-only prompt to Z.AI API"""
         try:
             payload = {
@@ -1080,7 +1078,7 @@ class TagConsolidator:
     def __init__(
         self,
         emby_client: EmbyVideoTagger,
-        vision_processor: Optional[BaseVisionProcessor] = None,
+        vision_processor: BaseVisionProcessor | None = None,
     ):
         self.emby_client = emby_client
         self.vision_processor = vision_processor
@@ -1093,7 +1091,7 @@ class TagConsolidator:
         normalized = re.sub(r"\s+", " ", normalized)
         return normalized
 
-    def find_duplicate_groups(self, tags: List[str]) -> Dict[str, List[str]]:
+    def find_duplicate_groups(self, tags: list[str]) -> dict[str, list[str]]:
         """Group tags by their normalized form to find duplicates"""
         groups = {}
         for tag in tags:
@@ -1105,7 +1103,7 @@ class TagConsolidator:
         # Return only groups with duplicates
         return {k: v for k, v in groups.items() if len(v) > 1}
 
-    def choose_canonical_tag(self, tag_variants: List[str]) -> str:
+    def choose_canonical_tag(self, tag_variants: list[str]) -> str:
         """Choose the best canonical form from variants (prefer space-separated, lowercase)"""
         # Prefer the shortest tag that uses spaces (not hyphens/underscores)
         space_tags = [t for t in tag_variants if "-" not in t and "_" not in t]
@@ -1114,8 +1112,8 @@ class TagConsolidator:
         return min(tag_variants, key=len)
 
     def find_semantic_duplicates_llm(
-        self, tags: List[str], batch_size: int = 1000
-    ) -> List[Tuple[str, str]]:
+        self, tags: list[str], batch_size: int = 1000
+    ) -> list[tuple[str, str]]:
         """Use configured LLM to find semantically similar tags that should be merged"""
         if not self.vision_processor:
             self.logger.warning("No vision processor configured for semantic analysis")
@@ -1125,7 +1123,7 @@ class TagConsolidator:
 
     def consolidate_tags(
         self, dry_run: bool = True, use_llm: bool = False, interactive: bool = True
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Main consolidation function.
 
@@ -1274,7 +1272,7 @@ class TagConsolidator:
 
         return stats
 
-    def print_stats(self, stats: Dict):
+    def print_stats(self, stats: dict):
         """Print consolidation statistics"""
         print("\n" + "=" * 50)
         print("TAG CONSOLIDATION SUMMARY")
@@ -1295,7 +1293,7 @@ class TagConsolidator:
 class VideoTaggingAutomation:
     """Main automation class that orchestrates the entire video tagging process"""
 
-    def __init__(self, config: Dict):
+    def __init__(self, config: dict):
         self.config = config
         self.emby_client = EmbyVideoTagger(
             config["emby"]["server_url"],
@@ -1418,7 +1416,7 @@ class VideoTaggingAutomation:
         self.logger.warning(f"No path mapping found for: {emby_path}")
         return emby_path
 
-    def _extract_frames_for_video(self, video: Dict, source_type: str) -> bool:
+    def _extract_frames_for_video(self, video: dict, source_type: str) -> bool:
         """Extracts frames for a single video and saves them to the cache."""
         video_id = video["Id"]
         emby_video_path = video["Path"]
@@ -1457,11 +1455,11 @@ class VideoTaggingAutomation:
             return True
 
         except Exception as e:
-            self.logger.error(f"Frame extraction failed for {video_name}: {str(e)}")
+            self.logger.error(f"Frame extraction failed for {video_name}: {e!s}")
             self._update_task_status(video_id, TaskStatus.FAILED, error=str(e))
             return False
 
-    def _analyze_frames_for_video(self, task: Dict) -> bool:
+    def _analyze_frames_for_video(self, task: dict) -> bool:
         """Analyzes cached frames for a single video and updates Emby."""
         video_id = task["emby_id"]
         video_path = task["file_path"]
@@ -1542,11 +1540,11 @@ class VideoTaggingAutomation:
                 raise ValueError("Failed to update tags in Emby.")
 
         except Exception as e:
-            self.logger.error(f"Frame analysis failed for {video_name}: {str(e)}")
+            self.logger.error(f"Frame analysis failed for {video_name}: {e!s}")
             self._update_task_status(video_id, TaskStatus.FAILED, error=str(e))
             return False
 
-    def _get_pending_analysis_tasks(self) -> List[Dict]:
+    def _get_pending_analysis_tasks(self) -> list[dict]:
         """Retrieves tasks from the database that are pending analysis."""
         conn = sqlite3.connect(self.task_tracker)
         conn.row_factory = sqlite3.Row
@@ -1646,7 +1644,7 @@ class VideoTaggingAutomation:
             return True
 
         except Exception as e:
-            self.logger.error(f"Failed to copy favorite video {video_name}: {str(e)}")
+            self.logger.error(f"Failed to copy favorite video {video_name}: {e!s}")
             return False
 
     def _get_completed_emby_ids(self) -> set:
@@ -1670,8 +1668,8 @@ class VideoTaggingAutomation:
 
     def _should_process_video(
         self,
-        video: Dict,
-        completed_ids: Optional[set] = None,
+        video: dict,
+        completed_ids: set | None = None,
     ) -> bool:
         """Determine if video needs processing"""
         # Check if already processed via marker tag. Compare normalized forms
@@ -1720,8 +1718,8 @@ class VideoTaggingAutomation:
         video_id: str,
         status: TaskStatus,
         tag_count: int = 0,
-        error: Optional[str] = None,
-        file_path: Optional[str] = None,
+        error: str | None = None,
+        file_path: str | None = None,
         source_type: str = "recent",
     ):
         """Update task processing status in database"""
@@ -1767,7 +1765,7 @@ class VideoTaggingAutomation:
         finally:
             conn.close()
 
-    def _get_video_details(self, video_id: str) -> Optional[Dict]:
+    def _get_video_details(self, video_id: str) -> dict | None:
         """Fetches detailed metadata for a single video from Emby."""
         try:
             url = f"{self.emby_client.base_url}/emby/Items?Ids={video_id}&Fields=Path,Tags,TagItems"
@@ -1843,7 +1841,7 @@ class VideoTaggingAutomation:
 
         return analysis_success
 
-    def get_processing_stats(self) -> Dict:
+    def get_processing_stats(self) -> dict:
         """Get statistics about processing tasks"""
         conn = sqlite3.connect(self.task_tracker)
 
