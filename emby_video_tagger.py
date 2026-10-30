@@ -940,13 +940,16 @@ class APIVisionProcessor(BaseVisionProcessor):
                         ],
                     }
                 ],
-                "thinking": {"type": "enabled"},
+                # Bound the generation: without max_tokens the server generates
+                # until the context is full, which is the main cause of
+                # multi-minute responses on a thinking-capable model.
+                "max_tokens": 400,
             }
 
             # Make API request
-            import requests
-
-            response = requests.post(self.base_url, headers=self.headers, json=payload)
+            response = requests.post(
+                self.base_url, headers=self.headers, json=payload, timeout=120
+            )
 
             # Check for error response
             if response.status_code != 200:
@@ -1005,8 +1008,11 @@ class APIVisionProcessor(BaseVisionProcessor):
             payload = {
                 "model": self.model_name,
                 "messages": [{"role": "user", "content": prompt}],
+                "max_tokens": 1500,
             }
-            response = requests.post(self.base_url, headers=self.headers, json=payload)
+            response = requests.post(
+                self.base_url, headers=self.headers, json=payload, timeout=180
+            )
             if response.status_code == 200:
                 return response.json()["choices"][0]["message"]["content"]
             else:
